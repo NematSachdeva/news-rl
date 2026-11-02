@@ -89,7 +89,10 @@
         <!-- MASTHEAD -->
         <header class="masthead">
           <div class="masthead-row">
-            <span class="wordmark">NeuroFeed</span>
+            <div class="masthead-brand">
+              <span class="wordmark">NeuroFeed</span>
+              <span id="catalogStatus" class="catalog-status-badge">Updated: Just now</span>
+            </div>
             <div class="user-menu" id="userMenu">
               <button class="btn-user" id="userMenuBtn" type="button">
                 <span id="userEmail">User</span>
@@ -103,6 +106,11 @@
           </div>
           <div class="masthead-rule"></div>
         </header>
+
+        <!-- STALE WINDOW BANNER -->
+        <div id="staleWindowBanner" class="stale-window-banner hidden">
+          <span>🗞️ Archive Edition • Showing older articles because latest refresh has not run yet.</span>
+        </div>
 
         <!-- MOOD BAR — tunes recommendations to how the user feels right now -->
         <section class="mood-bar">

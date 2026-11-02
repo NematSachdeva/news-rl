@@ -285,3 +285,260 @@ def test_storage_and_nlp_refit(tmp_path):
     first = recs["recommendations"][0]
     assert first["source_name"] == "Tech Dispatch"
     assert first["category"] == "technology"
+
+
+def test_24h_rule_triggers_when_25h_old_and_skips_when_2h_old(tmp_path):
+    from datetime import datetime, timezone, timedelta
+    from database import init_db, set_meta
+    from news_ingest.scheduler import is_refresh_due
+
+    db_path = tmp_path / "news_24h.sqlite"
+    init_db(db_path)
+    storage = NewsStorage(db_path)
+
+    # 1. Zero real articles in DB -> immediately due
+    due, reason = is_refresh_due(db_path, interval_hours=24.0)
+    assert due is True
+    assert "No real news articles" in reason
+
+    # Seed one real article
+    storage.store_articles([
+        NormalizedArticle(
+            id="real_test_001",
+            title="Real article headline",
+            description="Snippet",
+            url="https://example.com/art1",
+            source_name="Daily",
+            published_at="2026-11-02 10:00:00",
+            raw_categories=["technology"],
+            mapped_category="technology",
+            mapping_confidence=1.0,
+        )
+    ])
+
+    fixed_now = datetime(2026, 11, 3, 12, 0, 0, tzinfo=timezone.utc)
+
+    # 2. Case: last ingest was 25 hours ago -> DUE
+    last_ingest_25h = (fixed_now - timedelta(hours=25)).isoformat()
+    set_meta("last_successful_ingest_at", last_ingest_25h, db_path=db_path)
+    due, reason = is_refresh_due(db_path, interval_hours=24.0, now_dt=fixed_now)
+    assert due is True
+    assert "25.0h old" in reason
+
+    # 3. Case: last ingest was 2 hours ago -> NOT DUE
+    last_ingest_2h = (fixed_now - timedelta(hours=2)).isoformat()
+    set_meta("last_successful_ingest_at", last_ingest_2h, db_path=db_path)
+    due, reason = is_refresh_due(db_path, interval_hours=24.0, now_dt=fixed_now)
+    assert due is False
+    assert "last updated 2.0h ago" in reason
+
+    # 4. Case: clock anomaly (timestamp is 3 hours in the future) -> SAFE NO-OP
+    last_ingest_future = (fixed_now + timedelta(hours=3)).isoformat()
+    set_meta("last_successful_ingest_at", last_ingest_future, db_path=db_path)
+    due, reason = is_refresh_due(db_path, interval_hours=24.0, now_dt=fixed_now)
+    assert due is False
+    assert "Clock anomaly" in reason
+
+
+def test_prune_expired_articles_preserves_interacted_items(tmp_path):
+    from datetime import datetime, timezone, timedelta
+    from database import init_db, prune_expired_articles, db_connect
+
+    db_path = tmp_path / "prune_test.sqlite"
+    init_db(db_path)
+    storage = NewsStorage(db_path)
+
+    now = datetime.now(timezone.utc)
+    old_date = (now - timedelta(days=16)).strftime("%Y-%m-%d %H:%M:%S")
+    fresh_date = (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+
+    storage.store_articles([
+        NormalizedArticle(
+            id="real_old_interacted",
+            title="Old Article with User Feedback",
+            description="This article was liked by the user.",
+            url="https://example.com/old-interacted",
+            source_name="Source A",
+            published_at=old_date,
+            raw_categories=["technology"],
+            mapped_category="technology",
+            mapping_confidence=1.0,
+        ),
+        NormalizedArticle(
+            id="real_old_uninteracted",
+            title="Old Article without Feedback",
+            description="Nobody engaged with this article.",
+            url="https://example.com/old-uninteracted",
+            source_name="Source B",
+            published_at=old_date,
+            raw_categories=["technology"],
+            mapped_category="technology",
+            mapping_confidence=1.0,
+        ),
+        NormalizedArticle(
+            id="real_fresh_article",
+            title="Fresh News from Yesterday",
+            description="Recent news within the 14-day window.",
+            url="https://example.com/fresh-art",
+            source_name="Source C",
+            published_at=fresh_date,
+            raw_categories=["business"],
+            mapped_category="business",
+            mapping_confidence=1.0,
+        ),
+    ])
+
+    # Record user interaction on real_old_interacted
+    with db_connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO interactions (user_id, news_id, category, liked, created_at)
+            VALUES ('user_abc', 'real_old_interacted', 'technology', 1, CURRENT_TIMESTAMP)
+            """
+        )
+
+    # Prune articles older than 14 days
+    pruned_count = prune_expired_articles(db_path, max_age_days=14)
+    assert pruned_count == 1
+
+    with db_connect(db_path) as conn:
+        remaining_ids = {r[0] for r in conn.execute("SELECT news_id FROM news").fetchall()}
+
+    assert "real_old_interacted" in remaining_ids  # Preserved because of user feedback!
+    assert "real_fresh_article" in remaining_ids   # Preserved because within 14-day window!
+    assert "real_old_uninteracted" not in remaining_ids  # Pruned!
+
+
+def test_feed_recency_window_and_fallback(tmp_path):
+    from datetime import datetime, timezone, timedelta
+    from database import init_db
+
+    db_path = tmp_path / "recency_test.sqlite"
+    init_db(db_path)
+    storage = NewsStorage(db_path)
+
+    now = datetime.now(timezone.utc)
+    # Articles from 5 days ago (older than the 3-day feed window)
+    stale_date = (now - timedelta(days=5)).strftime("%Y-%m-%d %H:%M:%S")
+
+    storage.store_articles([
+        NormalizedArticle(
+            id=f"real_stale_{i}",
+            title=f"Archived Story Number {i}",
+            description="Story published 5 days ago.",
+            url=f"https://example.com/archived-{i}",
+            source_name="Old Times",
+            published_at=stale_date,
+            raw_categories=["business"],
+            mapped_category="business",
+            mapping_confidence=1.0,
+        )
+        for i in range(10)
+    ])
+
+    engine = NewsRecommender(db_path)
+    resp = engine.recommend("recency_user", k=6)
+
+    # Since no articles exist within 3 days, feed should fall back to older articles
+    # and mark the response with is_stale_window = True
+    assert resp["is_stale_window"] is True
+    assert len(resp["recommendations"]) > 0
+    assert resp["recommendations"][0]["is_older"] is True
+
+
+def test_empty_catalog_graceful_handling(tmp_path):
+    from database import init_db
+
+    db_path = tmp_path / "empty_catalog.sqlite"
+    init_db(db_path)
+
+    engine = NewsRecommender(db_path)
+    resp = engine.recommend("brand_new_user", k=8)
+    assert resp["recommendations"] == []
+    assert resp["is_cold_start"] is True
+
+
+def test_preference_ordering_on_real_catalog(tmp_path):
+    from database import init_db
+
+    db_path = tmp_path / "pref_order.sqlite"
+    init_db(db_path)
+    storage = NewsStorage(db_path)
+
+    # Seed real articles across 8 distinct categories
+    articles = []
+    for cat in ["technology", "business", "sports", "world", "science", "entertainment", "health", "lifestyle"]:
+        for i in range(4):
+            articles.append(
+                NormalizedArticle(
+                    id=f"real_{cat}_{i}",
+                    title=f"Headlines in {cat} #{i}",
+                    description=f"Detailed report on current developments in {cat} sector.",
+                    url=f"https://example.com/{cat}/{i}",
+                    source_name=f"{cat.capitalize()} News",
+                    published_at="2026-11-03 01:00:00",
+                    raw_categories=[cat],
+                    mapped_category=cat,
+                    mapping_confidence=1.0,
+                )
+            )
+    storage.store_articles(articles)
+
+    engine = NewsRecommender(db_path)
+    engine.refit_nlp()
+
+    # (a) New user with declared interest in "technology"
+    engine.onboard_user({
+        "user_id": "tech_fan",
+        "interests": ["technology"],
+        "exploration_preference": 0.1,
+    })
+    recs = engine.recommend("tech_fan", k=8)
+
+    # Batch is returned (respecting diversity cap of <= 2 per category)
+    assert len(recs["recommendations"]) >= 6
+    # Top recommendations are dominated by the declared interest
+    top_categories = [r["category"] for r in recs["recommendations"][:2]]
+    assert "technology" in top_categories
+
+    # (b) User gives repeated likes on "sports" articles
+    sports_article = next(r for r in recs["recommendations"] if r["category"] == "sports")
+    for _ in range(3):
+        engine.feedback({
+            "user_id": "tech_fan",
+            "news_id": sports_article["news_id"],
+            "liked": 1,
+            "time_spent": 15.0,
+            "scroll_depth": 0.85,
+        })
+
+    # Next recommendation: sports affinity should rise
+    recs_after = engine.recommend("tech_fan", k=8)
+    sports_in_new_batch = any(r["category"] == "sports" for r in recs_after["recommendations"])
+    assert sports_in_new_batch is True
+    # The liked sports article itself is not repeated
+    after_ids = [r["news_id"] for r in recs_after["recommendations"]]
+    assert sports_article["news_id"] not in after_ids
+
+
+def test_live_news_bulletin_does_not_mix_with_main_feed(tmp_path):
+    from database import init_db, db_connect
+
+    db_path = tmp_path / "live_isolate.sqlite"
+    init_db(db_path)
+
+    # Insert an article tagged is_live = 1 (NewsAPI.org Live News bulletin)
+    with db_connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO news (news_id, category, abstract, is_live)
+            VALUES ('live_bulletin_999', 'world', 'Breaking Live News Bulletin', 1)
+            """
+        )
+
+    engine = NewsRecommender(db_path)
+    resp = engine.recommend("test_user_live", k=8)
+
+    # The is_live = 1 article must never appear in recommendations
+    returned_ids = [r["news_id"] for r in resp["recommendations"]]
+    assert "live_bulletin_999" not in returned_ids

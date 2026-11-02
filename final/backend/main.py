@@ -39,8 +39,9 @@ from auth import (
     get_user_by_id, revoke_token,
 )
 from news_ingest.scheduler import (
-    first_run_ingest_if_needed,
+    get_ingest_status,
     start_ingest_scheduler,
+    startup_refresh_if_due,
     stop_ingest_scheduler,
 )
 
@@ -96,7 +97,7 @@ async def lifespan(app: FastAPI):
     # Real news auto-ingestion & periodic scheduler
     start_ingest_scheduler(settings)
     loop = asyncio.get_event_loop()
-    loop.run_in_executor(None, first_run_ingest_if_needed, settings)
+    loop.run_in_executor(None, startup_refresh_if_due, settings)
 
     asyncio.ensure_future(_warmup())
     yield
@@ -433,27 +434,34 @@ def metrics():
     return PlainTextResponse(METRICS.render_prometheus(), media_type="text/plain; version=0.0.4")
 
 
-@app.post("/import_data")
-def import_data(force: bool = False):
-    return import_csvs(DB_PATH, force=force)
+@app.get("/news/status")
+def news_status():
+    """Return catalog freshness status, category counts, and scheduled refresh due time."""
+    return get_ingest_status(settings)
 
 
 @app.post("/news/ingest")
 def trigger_ingest(
-    countries: str = "in,us,gb",
-    categories: str = "top,world,technology,business,sports",
-    max_articles: int = 40,
+    force: bool = False,
+    countries: str | None = None,
+    categories: str | None = None,
+    max_articles: int = 60,
 ):
+    """
+    Trigger real news ingestion on-demand from NewsData.io.
+    Pass ?force=true to bypass the 24-hour interval check.
+    """
     from news_ingest.run import run_ingest
 
-    c_list = [c.strip() for c in countries.split(",") if c.strip()]
-    cat_list = [c.strip() for c in categories.split(",") if c.strip()]
+    c_list = [c.strip() for c in (countries or settings.news_ingest_countries).split(",") if c.strip()]
+    cat_list = [c.strip() for c in (categories or settings.news_ingest_categories).split(",") if c.strip()]
     counts = run_ingest(
         provider_name="newsdata",
         countries=c_list,
         categories=cat_list,
         max_articles=max_articles,
         refit_nlp=True,
+        force=force,
     )
     return {"status": "ok", "counts": counts}
 

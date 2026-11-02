@@ -16,13 +16,13 @@ case "$cmd" in
     .venv/bin/pip install -r final/requirements-dev.txt
     echo "==> Setup finished."
     ;;
-  seed)
-    echo "==> Seeding database..."
-    (cd final && ../.venv/bin/python scripts/seed_demo_data.py --import)
-    ;;
   ingest)
     echo "==> Ingesting real news from NewsData.io..."
     (cd final && ../.venv/bin/python -m news_ingest.run)
+    ;;
+  ingest-force)
+    echo "==> Force ingesting real news from NewsData.io..."
+    (cd final && ../.venv/bin/python -m news_ingest.run --force)
     ;;
   test)
     echo "==> Running tests..."
@@ -38,12 +38,12 @@ case "$cmd" in
     ;;
   all)
     "$0" setup
-    "$0" seed
+    "$0" ingest
     "$0" test
     echo "==> Ready! Run './run.sh' to start."
     ;;
   *)
-    echo "Usage: $0 {setup|seed|ingest|run|test|eval|all}"
+    echo "Usage: $0 {setup|ingest|ingest-force|run|test|eval|all}"
     exit 1
     ;;
 esac

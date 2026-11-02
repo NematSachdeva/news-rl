@@ -16,10 +16,9 @@ services:
     plan: free
     rootDir: final
     buildCommand: pip install -r requirements.txt
-    # Seeds the synthetic demo dataset if the DB is empty (idempotent —
-    # see scripts/seed_demo_data.py), then starts the API. Render sets
-    # $PORT; the app must bind to it, not a hardcoded port.
-    startCommand: python scripts/seed_demo_data.py --import && python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    # Starts the FastAPI backend with real news pipeline. Render sets
+    # $PORT; the app binds to it.
+    startCommand: python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION

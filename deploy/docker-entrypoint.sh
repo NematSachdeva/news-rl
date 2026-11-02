@@ -10,21 +10,6 @@ set -eu
 chown -R appuser:appuser /app/data /app/models
 chmod -R u+rwX /app/data /app/models
 
-# First boot (fresh volume, empty DB): seed the synthetic demo dataset so
-# the container is useful the moment it comes up, no manual data-loading
-# step required. Skipped entirely if the DB already has articles — either
-# a previous run already seeded it, or a real dataset was mounted in and
-# imported; either way this must never overwrite it.
-NEWS_COUNT=$(gosu appuser python -c "
-from database import DB_PATH, db_connect, init_db
-init_db(DB_PATH)
-with db_connect(DB_PATH) as conn:
-    print(conn.execute('SELECT COUNT(*) FROM news').fetchone()[0])
-" 2>/dev/null || echo 0)
-
-if [ "$NEWS_COUNT" = "0" ]; then
-    echo "No articles in DB — seeding synthetic demo dataset..."
-    gosu appuser python scripts/seed_demo_data.py --import
-fi
-
+# First boot: real news auto-ingests on demand when configured.
+# No synthetic data is seeded.
 exec gosu appuser "$@"

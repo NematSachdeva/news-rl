@@ -386,6 +386,44 @@ button:active { filter: brightness(0.9); transform: scale(0.96); }
   color: var(--ink);
 }
 
+.masthead-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.catalog-status-badge {
+  font-family: var(--sans);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+}
+
+.catalog-status-badge.empty {
+  color: #ff9800;
+  border-color: rgba(255, 152, 0, 0.3);
+}
+
+.stale-window-banner {
+  background: rgba(255, 152, 0, 0.08);
+  border: 1px solid rgba(255, 152, 0, 0.25);
+  color: #ffb74d;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: var(--r-sm);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .masthead-rule {
   height: 3px;
   background: var(--ink);

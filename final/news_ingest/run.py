@@ -11,12 +11,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from config import get_settings
-from database import init_db
+from database import init_db, prune_expired_articles
 from logging_config import configure_logging, get_logger
 from news_ingest.category_mapping import CategoryMapper
 from news_ingest.credit_tracker import CreditTracker
 from news_ingest.newsdata import NewsDataProvider
 from news_ingest.storage import NewsStorage
+from news_ingest.scheduler import is_refresh_due, record_successful_ingest
 from recommender import NewsRecommender
 
 logger = get_logger("news_ingest")
@@ -28,11 +29,26 @@ def run_ingest(
     categories: list[str] | None = None,
     languages: list[str] | None = None,
     since: str = "48h",
-    max_articles: int = 50,
+    max_articles: int = 60,
     refit_nlp: bool = True,
+    force: bool = False,
 ) -> dict[str, int]:
     settings = get_settings()
     init_db(settings.db_path)
+
+    # 0. Check 24-hour refresh interval unless forced
+    if not force:
+        due, reason = is_refresh_due(settings.db_path, interval_hours=getattr(settings, "refresh_interval_hours", 24.0))
+        if not due:
+            logger.info("News ingestion skipped: %s. Use --force or 'make ingest-force' to bypass.", reason)
+            storage = NewsStorage(settings.db_path)
+            return {
+                "fetched": 0,
+                "deduped": 0,
+                "inserted": 0,
+                "credits_used": 0,
+                "skipped_reason": reason,
+            }
 
     # 1. Initialize credit tracker
     credit_tracker = CreditTracker(
@@ -87,8 +103,16 @@ def run_ingest(
     counts = storage.store_articles(articles)
     counts["credits_used"] = credits_consumed
 
-    # 6. Refit NLP index so MMR and retrieval work immediately
-    if refit_nlp and counts["inserted"] > 0:
+    # 6. Record successful ingest timestamp in system_meta
+    record_successful_ingest(settings.db_path, counts["inserted"])
+
+    # 7. Prune expired articles (older than max_article_age_days without interactions)
+    max_age_days = getattr(settings, "max_article_age_days", 14)
+    pruned = prune_expired_articles(settings.db_path, max_age_days=max_age_days)
+    counts["pruned"] = pruned
+
+    # 8. Refit NLP index so MMR and retrieval work immediately
+    if refit_nlp and (counts["inserted"] > 0 or pruned > 0):
         logger.info("Refitting NLP engine (BM25 + TF-IDF + LSA) on updated catalog...")
         engine = NewsRecommender(settings.db_path)
         engine.refit_nlp()
@@ -100,6 +124,7 @@ def run_ingest(
         "  Fetched         : %d\n"
         "  Deduped         : %d\n"
         "  Inserted        : %d\n"
+        "  Pruned (expired): %d\n"
         "  Credits Used    : %d\n"
         "  Remaining Daily : %d / %d\n"
         "  Total in Catalog: %d (Real: %d)",
@@ -107,6 +132,7 @@ def run_ingest(
         counts["fetched"],
         counts["deduped"],
         counts["inserted"],
+        counts.get("pruned", 0),
         counts["credits_used"],
         credit_tracker.remaining_credits(),
         credit_tracker.daily_limit,
@@ -117,14 +143,28 @@ def run_ingest(
 
 
 def main() -> None:
+    settings = get_settings()
     parser = argparse.ArgumentParser(description="Ingest real news into NeuroFeed.")
     parser.add_argument("--provider", default="newsdata", help="News provider (default: newsdata)")
-    parser.add_argument("--countries", default="in,us,gb", help="Comma-separated country codes (max 5)")
-    parser.add_argument("--categories", default="top,world,technology,business,sports", help="Comma-separated category names (max 5)")
-    parser.add_argument("--languages", default="en", help="Comma-separated language codes")
-    parser.add_argument("--since", default="48h", help="Timeframe window")
-    parser.add_argument("--max-articles", type=int, default=50, help="Max articles to fetch")
+    parser.add_argument(
+        "--countries",
+        default=getattr(settings, "news_ingest_countries", "in,us,gb"),
+        help="Comma-separated country codes (max 5 per sub-request)",
+    )
+    parser.add_argument(
+        "--categories",
+        default=getattr(settings, "news_ingest_categories", "business,education,entertainment,health,lifestyle,politics,science,sports,technology,world,top"),
+        help="Comma-separated category names",
+    )
+    parser.add_argument(
+        "--languages",
+        default=getattr(settings, "news_ingest_languages", "en"),
+        help="Comma-separated language codes",
+    )
+    parser.add_argument("--since", default=getattr(settings, "news_ingest_since", "48h"), help="Timeframe window")
+    parser.add_argument("--max-articles", type=int, default=60, help="Max articles to fetch")
     parser.add_argument("--no-refit-nlp", action="store_true", help="Skip refitting the NLP index")
+    parser.add_argument("--force", action="store_true", help="Bypass 24-hour refresh interval check")
 
     args = parser.parse_args()
     configure_logging("INFO")
@@ -141,9 +181,9 @@ def main() -> None:
         since=args.since,
         max_articles=args.max_articles,
         refit_nlp=not args.no_refit_nlp,
+        force=args.force,
     )
 
 
 if __name__ == "__main__":
     main()
-

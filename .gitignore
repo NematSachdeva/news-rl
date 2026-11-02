@@ -22,6 +22,7 @@ env/
 *.log
 final/data/*.sqlite
 final/data/cache/
+final/data/backups/
 final/models/*.pt
 !final/models/.gitkeep
 

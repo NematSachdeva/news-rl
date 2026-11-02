@@ -591,9 +591,13 @@ function paintCard() {
 // user clicks or presses does anything.
 function paintEmptyState() {
   hidePoll();
-  $("category").textContent = "";
-  $("headline").textContent = "You're all caught up";
-  $("abstract").textContent = "No more articles to show right now — try a different topic from the sidebar, change your mood, or check back later.";
+  $("category").textContent = "NO NEWS";
+  $("headline").textContent = "No news loaded yet";
+  $("abstract").textContent = "No real articles found in the local catalog. Add NEWSDATA_API_KEY to your .env file and run 'make ingest' to load real news.";
+  const bylineEl = $("byline") || document.querySelector(".byline");
+  if (bylineEl) bylineEl.textContent = "SYSTEM DESK";
+  const timerEl = $("readTimer");
+  if (timerEl) timerEl.textContent = "";
   const urlEl = $("url");
   if (urlEl) urlEl.classList.add("hidden");
   const statReadTime = $("statReadTime"); if (statReadTime) statReadTime.textContent = "";
@@ -645,18 +649,20 @@ function paintCardContent(item) {
     bylineEl.textContent = (item.source_name || "NEUROFEED DESK").toUpperCase();
   }
   const timerEl = $("readTimer");
-  if (timerEl && item.published_at) {
-    const pubDate = new Date(item.published_at);
-    if (!isNaN(pubDate.getTime())) {
-      const diffHours = Math.round((Date.now() - pubDate.getTime()) / (1000 * 60 * 60));
-      if (diffHours >= 24) {
-        timerEl.textContent = `${Math.round(diffHours / 24)}d ago`;
-      } else if (diffHours > 0) {
-        timerEl.textContent = `${diffHours}h ago`;
-      } else {
-        timerEl.textContent = "just now";
+  if (timerEl) {
+    let timeStr = "just now";
+    if (item.published_at) {
+      const pubDate = new Date(item.published_at);
+      if (!isNaN(pubDate.getTime())) {
+        const diffHours = Math.round((Date.now() - pubDate.getTime()) / (1000 * 60 * 60));
+        if (diffHours >= 24) {
+          timeStr = `${Math.round(diffHours / 24)}d ago`;
+        } else if (diffHours > 0) {
+          timeStr = `${diffHours}h ago`;
+        }
       }
     }
+    timerEl.textContent = item.is_older ? `${timeStr} · Archive` : timeStr;
   }
 
   // Stats row — real article metadata, not invented engagement numbers.
@@ -812,6 +818,14 @@ async function refreshRecommendations(mode = null) {
       });
       recommendations = data.recommendations || [];
       updateMoodIndicator(data.mood, data.mood_freshness);
+      const staleBanner = $("staleWindowBanner");
+      if (staleBanner) {
+        if (data.is_stale_window && recommendations.length > 0) {
+          staleBanner.classList.remove("hidden");
+        } else {
+          staleBanner.classList.add("hidden");
+        }
+      }
     } catch (e) {
       showToast("Couldn't load new recommendations — retrying next action.", "error");
       throw e;
@@ -1383,6 +1397,26 @@ function initHeroTilt() {
 }
 initHeroTilt();
 
+async function updateCatalogStatus() {
+  try {
+    const res = await fetch("/news/status");
+    if (res.ok) {
+      const data = await res.json();
+      const el = $("catalogStatus");
+      if (el) {
+        if (data.total_articles === 0) {
+          el.textContent = "Catalog empty • Run 'make ingest'";
+          el.className = "catalog-status-badge empty";
+        } else {
+          el.textContent = `Updated ${data.last_updated_human}`;
+          el.className = "catalog-status-badge";
+        }
+      }
+    }
+  } catch (e) {}
+}
+
 // ─── Init ─────────────────────────────────────────────────────
 
-Promise.all([loadCategories(), loadUserIds()]).catch(console.error);
+Promise.all([loadCategories(), loadUserIds(), updateCatalogStatus()]).catch(console.error);
+setInterval(updateCatalogStatus, 60000);

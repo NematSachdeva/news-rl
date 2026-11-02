@@ -14,14 +14,14 @@ import logging
 import math
 import random
 from collections import Counter, OrderedDict
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from config import get_settings
-from database import DB_PATH, db_connect, fetch_categories, import_csvs, init_db
+from database import DB_PATH, db_connect, fetch_categories, init_db
 from ddqn_agent import DDQNAgent
 from graph_memory import UserInterestGraph
 from mood_signals import decayed_mood_affinity, mood_affinity, mood_decay_factor
@@ -78,10 +78,6 @@ class NewsRecommender:
         self._nlp = EnhancedNLPEngine(n_lsa=64)
         self._graph = UserInterestGraph(db_path)
         self._nlp_fitted = False
-        with db_connect(db_path) as conn:
-            news_count = conn.execute("SELECT COUNT(*) FROM news").fetchone()[0]
-        if news_count == 0:
-            import_csvs(db_path=db_path, force=False)
 
     # ──────────────────────────────────────────────────────
     #  Category helpers
@@ -291,7 +287,7 @@ class NewsRecommender:
         location:   str | None = None,
         force_mode: str | None = None,   # "trending" → skip personalised pool
         category:   str | None = None,   # sidebar "browse this topic" filter
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], bool]:
         blocked_sql = ",".join("?" for _ in blocked) or "''"
         seen_sql    = ",".join("?" for _ in seen_news) or "''"
         # is_live=1 rows (live_news.py) are the dedicated "Live News"
@@ -317,6 +313,27 @@ class NewsRecommender:
             " COALESCE(news.published_at, '') AS published_at"
         )
 
+        feed_window_days = getattr(self.settings, "feed_recency_days", 3)
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(days=feed_window_days)
+        cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Test if enough fresh articles exist in the feed window
+        fresh_count_sql = (
+            f"SELECT COUNT(*) FROM news WHERE {base_filter} "
+            "AND (news.published_at >= ? OR news.published_at = '')"
+        )
+        fresh_count_res = conn.execute(fresh_count_sql, base_params + [cutoff_str]).fetchone()
+        fresh_count = fresh_count_res[0] if fresh_count_res else 0
+
+        is_stale_window = False
+        if fresh_count >= min(8, pool_size):
+            effective_filter = f"{base_filter} AND (news.published_at >= ? OR news.published_at = '')"
+            effective_base_params = base_params + [cutoff_str]
+        else:
+            effective_filter = base_filter
+            effective_base_params = base_params
+            is_stale_window = True
+
         # Pool composition: normal vs. force-trending
         if force_mode == "trending":
             mix = [
@@ -339,42 +356,46 @@ class NewsRecommender:
                     f"SELECT {COLS} FROM news"
                     " LEFT JOIN user_category_prefs ucp"
                     "   ON ucp.user_id = ? AND ucp.category = news.category"
-                    f" WHERE {base_filter}"
+                    f" WHERE {effective_filter}"
                     " ORDER BY (CASE WHEN news.news_id LIKE 'real_%' OR news.news_id LIKE 'nd_%' THEN 1 ELSE 0 END) DESC,"
+                    "          COALESCE(news.published_at, '') DESC,"
                     "          COALESCE(ucp.preference, 0.2) DESC, RANDOM()"
                     " LIMIT ?"
                 )
-                params = [user_id] + base_params + [max(25, count * 3)]
+                params = [user_id] + effective_base_params + [max(25, count * 3)]
             elif pool_mode == "trending":
                 sql = (
                     f"SELECT {COLS} FROM news"
                     " LEFT JOIN category_stats cs ON cs.category = news.category"
-                    f" WHERE {base_filter}"
+                    f" WHERE {effective_filter}"
                     " ORDER BY (CASE WHEN news.news_id LIKE 'real_%' OR news.news_id LIKE 'nd_%' THEN 1 ELSE 0 END) DESC,"
+                    "          COALESCE(news.published_at, '') DESC,"
                     "          COALESCE(cs.trending_score, 0) DESC, RANDOM()"
                     " LIMIT ?"
                 )
-                params = base_params + [max(25, count * 3)]
+                params = effective_base_params + [max(25, count * 3)]
             else:
                 sql = (
-                    f"SELECT {COLS} FROM news WHERE {base_filter}"
+                    f"SELECT {COLS} FROM news WHERE {effective_filter}"
                     " ORDER BY (CASE WHEN news.news_id LIKE 'real_%' OR news.news_id LIKE 'nd_%' THEN 1 ELSE 0 END) DESC,"
+                    "          COALESCE(news.published_at, '') DESC,"
                     "          RANDOM() LIMIT ?"
                 )
-                params = base_params + [max(25, count * 3)]
+                params = effective_base_params + [max(25, count * 3)]
 
             added = 0
             for r in conn.execute(sql, params).fetchall():
                 row = dict(r)
                 if row["news_id"] not in global_seen:
                     row["source_mix"] = pool_mode
+                    row["is_older"] = bool(is_stale_window or (row.get("published_at") and row["published_at"] < cutoff_str))
                     candidates.append(row)
                     global_seen.add(row["news_id"])
                     added += 1
                     if added >= count:
                         break
 
-        return candidates
+        return candidates, is_stale_window
 
     def _category_balanced_rows(
         self,
@@ -568,10 +589,11 @@ class NewsRecommender:
                 "SELECT COUNT(*) FROM interactions WHERE user_id = ?", (user_id,)
             ).fetchone()[0]
 
-            candidates = self._fetch_candidates_conn(
+            cand_res = self._fetch_candidates_conn(
                 conn, user_id, seen_news, blocked, pool_size=25,
                 location=location, force_mode=mode, category=category,
             )
+            candidates, is_stale_window = cand_res if isinstance(cand_res, tuple) else (cand_res, False)
 
         # ── attention ─────────────────────────────────────
         snap      = get_latest_attention_snapshot()
@@ -785,6 +807,7 @@ class NewsRecommender:
             "blocked_categories":   sorted(blocked),
             "recommendations":      selected,
             "is_cold_start":        is_cold_start,
+            "is_stale_window":      is_stale_window,
             "interaction_count":    interaction_count,
             "mood":                 effective_mood or None,
             "mood_freshness":       round(mood_freshness, 4),

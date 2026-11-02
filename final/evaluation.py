@@ -32,6 +32,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Any
 
+from database import db_connect
 from recommender import NewsRecommender
 
 
@@ -171,13 +172,19 @@ def evaluate(
     seed: int = 0,
 ) -> dict[str, Any]:
     rng = random.Random(seed)
-    categories = engine.categories()
-    if not categories:
-        raise RuntimeError("No categories in DB — seed demo data first (scripts/seed_demo_data.py).")
+    with db_connect(engine.db_path) as conn:
+        active_cats = [
+            r[0] for r in conn.execute(
+                "SELECT DISTINCT category FROM news WHERE is_live = 0"
+            ).fetchall()
+        ]
+    if not active_cats:
+        print("No articles in database. Please run 'make ingest' first to fetch real news.")
+        sys.exit(0)
 
     episodes: list[EpisodeResult] = []
     for i in range(n_users):
-        true_interests = set(rng.sample(categories, min(2, len(categories))))
+        true_interests = set(rng.sample(active_cats, min(2, len(active_cats))))
         sim_user = SimulatedUser(user_id=f"eval_sim_user_{i}_{seed}", true_interests=true_interests)
         episodes.append(run_episode(engine, sim_user, rounds=rounds, k=k, rng=rng))
 
@@ -218,6 +225,11 @@ def main() -> None:
     args = parser.parse_args()
 
     engine = NewsRecommender()
+    catalog_count = _catalog_size(engine)
+    if catalog_count == 0:
+        print("No articles in database. Please run 'make ingest' first to fetch real news.")
+        sys.exit(0)
+
     report = evaluate(engine, n_users=args.users, rounds=args.rounds, k=args.k, seed=args.seed)
 
     print(f"\nEvaluation over {report['n_users']} simulated users x {report['rounds_per_user']} rounds (k={report['k']})\n")

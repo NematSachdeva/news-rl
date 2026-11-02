@@ -4,6 +4,7 @@ import json
 import sqlite3
 import math
 from contextlib import contextmanager
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -200,6 +201,12 @@ def init_db(db_path: Path = DB_PATH) -> None:
             CREATE INDEX IF NOT EXISTS idx_cat_stats_category ON category_stats(category);
             CREATE INDEX IF NOT EXISTS idx_graph_edges_user ON graph_edges(user_id);
             CREATE INDEX IF NOT EXISTS idx_co_interest_user ON graph_co_interest_edges(user_id);
+
+            CREATE TABLE IF NOT EXISTS system_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
         existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(interactions)").fetchall()}
@@ -264,6 +271,13 @@ def init_db(db_path: Path = DB_PATH) -> None:
         for col, definition in news_extra_cols.items():
             if col not in existing_news_cols:
                 conn.execute(f"ALTER TABLE news ADD COLUMN {col} {definition}")
+
+        # Ensure canonical categories are tracked in category_stats even on a fresh DB
+        for cat in _settings.categories:
+            conn.execute(
+                "INSERT OR IGNORE INTO category_stats (category, trending_score) VALUES (?, 0.0)",
+                (cat,),
+            )
 
 
 def normalize_user_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -487,11 +501,57 @@ def import_csvs(db_path: Path = DB_PATH, force: bool = False, chunksize: int = 2
     }
 
 
+def get_meta(key: str, default: str | None = None, db_path: Path = DB_PATH) -> str | None:
+    """Retrieve a value from the system_meta table."""
+    init_db(db_path)
+    with db_connect(db_path) as conn:
+        row = conn.execute("SELECT value FROM system_meta WHERE key = ?", (key,)).fetchone()
+        return str(row["value"]) if row and row["value"] is not None else default
+
+
+def set_meta(key: str, value: str, db_path: Path = DB_PATH) -> None:
+    """Store or update a value in the system_meta table."""
+    init_db(db_path)
+    with db_connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO system_meta (key, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (key, str(value)),
+        )
+
+
+def prune_expired_articles(db_path: Path = DB_PATH, max_age_days: int = 14) -> int:
+    """
+    Prune real articles older than max_age_days, preserving any articles that have
+    user interactions or memory references.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).strftime("%Y-%m-%d %H:%M:%S")
+    with db_connect(db_path) as conn:
+        res = conn.execute(
+            """
+            DELETE FROM news
+            WHERE is_live = 0
+              AND published_at != ''
+              AND published_at < ?
+              AND news_id NOT IN (SELECT DISTINCT news_id FROM interactions)
+              AND news_id NOT IN (SELECT DISTINCT news_id FROM user_memory)
+            """,
+            (cutoff,),
+        )
+        return max(0, res.rowcount)
+
+
 def fetch_categories(db_path: Path = DB_PATH) -> list[str]:
     init_db(db_path)
     with db_connect(db_path) as conn:
-        rows = conn.execute("SELECT DISTINCT category FROM news ORDER BY category").fetchall()
-    return [row[0] for row in rows]
+        rows = conn.execute("SELECT DISTINCT category FROM category_stats ORDER BY category").fetchall()
+    cats = [row[0] for row in rows if row[0]]
+    return cats if cats else list(_settings.categories)
 
 
 if __name__ == "__main__":

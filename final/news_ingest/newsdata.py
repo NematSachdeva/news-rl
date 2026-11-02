@@ -157,16 +157,22 @@ class NewsDataProvider(BaseNewsProvider):
 
         all_articles: list[NormalizedArticle] = []
         seen_ids: set[str] = set()
+        total_chunks = len(country_chunks) * len(category_chunks) * len(language_chunks)
+        chunk_idx = 0
 
         for c_list in country_chunks:
             for cat_list in category_chunks:
                 for lang_list in language_chunks:
+                    chunk_idx += 1
                     if len(all_articles) >= max_articles:
                         break
 
+                    remaining_chunks = total_chunks - chunk_idx + 1
+                    chunk_target = max(10, (max_articles - len(all_articles) + remaining_chunks - 1) // max(1, remaining_chunks))
+                    articles_this_chunk = 0
                     page_token: str | None = None
 
-                    while len(all_articles) < max_articles:
+                    while len(all_articles) < max_articles and articles_this_chunk < chunk_target:
                         params: dict[str, Any] = {
                             "size": 10,
                         }
@@ -197,6 +203,9 @@ class NewsDataProvider(BaseNewsProvider):
                             if norm.id not in seen_ids:
                                 seen_ids.add(norm.id)
                                 all_articles.append(norm)
+                                articles_this_chunk += 1
+                                if len(all_articles) >= max_articles:
+                                    break
 
                         page_token = data.get("nextPage")
                         if not page_token:

@@ -103,12 +103,37 @@ class Settings(BaseSettings):
     newsdata_base_url: str = "https://newsdata.io/api/1/latest"
     newsdata_daily_credit_limit: int = 180
     news_ingest_countries: str = "in,us,gb"
-    news_ingest_categories: str = "top,world,technology,business,sports"
+    news_ingest_categories: str = "business,education,entertainment,health,lifestyle,politics,science,sports,technology,world,top"
     news_ingest_languages: str = "en"
     news_ingest_since: str = "48h"
     news_ingest_interval_hours: float = 0.0
-    news_recency_days: int = 7
-    use_synthetic_data: bool = True
+    refresh_interval_hours: float = Field(
+        default=24.0,
+        validation_alias=AliasChoices("NEUROFEED_REFRESH_INTERVAL_HOURS", "REFRESH_INTERVAL_HOURS"),
+    )
+    feed_recency_days: int = Field(
+        default=3,
+        validation_alias=AliasChoices("NEUROFEED_FEED_RECENCY_DAYS", "FEED_RECENCY_DAYS"),
+    )
+    max_article_age_days: int = Field(
+        default=14,
+        validation_alias=AliasChoices("NEUROFEED_MAX_ARTICLE_AGE_DAYS", "MAX_ARTICLE_AGE_DAYS"),
+    )
+
+    @property
+    def categories(self) -> list[str]:
+        return [
+            "business",
+            "education",
+            "entertainment",
+            "health",
+            "lifestyle",
+            "politics",
+            "science",
+            "sports",
+            "technology",
+            "world",
+        ]
 
     @property
     def cors_origin_list(self) -> list[str]:
