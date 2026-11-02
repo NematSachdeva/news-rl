@@ -501,24 +501,34 @@ def test_preference_ordering_on_real_catalog(tmp_path):
     top_categories = [r["category"] for r in recs["recommendations"][:2]]
     assert "technology" in top_categories
 
-    # (b) User gives repeated likes on "sports" articles
-    sports_article = next(r for r in recs["recommendations"] if r["category"] == "sports")
+    # (b) User gives repeated likes on a non-technology article.
+    # The test seeds 4 articles per category, so a non-tech article should
+    # always be reachable; fall back to the full catalog if diversity cap
+    # happens to suppress all non-tech from the initial batch.
+    non_tech = next((r for r in recs["recommendations"] if r["category"] != "technology"), None)
+    if non_tech is None:
+        # Expand by requesting a bigger batch to find any non-tech article
+        wider = engine.recommend("tech_fan", k=32)
+        non_tech = next((r for r in wider["recommendations"] if r["category"] != "technology"), None)
+    assert non_tech is not None, "No non-technology article found in catalog — seed data problem"
+    target_category = non_tech["category"]
+
     for _ in range(3):
         engine.feedback({
             "user_id": "tech_fan",
-            "news_id": sports_article["news_id"],
+            "news_id": non_tech["news_id"],
             "liked": 1,
             "time_spent": 15.0,
             "scroll_depth": 0.85,
         })
 
-    # Next recommendation: sports affinity should rise
+    # Next recommendation: the liked category's affinity should rise
     recs_after = engine.recommend("tech_fan", k=8)
-    sports_in_new_batch = any(r["category"] == "sports" for r in recs_after["recommendations"])
-    assert sports_in_new_batch is True
-    # The liked sports article itself is not repeated
+    liked_cat_in_new_batch = any(r["category"] == target_category for r in recs_after["recommendations"])
+    assert liked_cat_in_new_batch is True
+    # The liked article itself is not repeated
     after_ids = [r["news_id"] for r in recs_after["recommendations"]]
-    assert sports_article["news_id"] not in after_ids
+    assert non_tech["news_id"] not in after_ids
 
 
 def test_live_news_bulletin_does_not_mix_with_main_feed(tmp_path):

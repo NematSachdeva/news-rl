@@ -819,22 +819,31 @@ class NewsRecommender:
     # ──────────────────────────────────────────────────────
 
     def poll_feedback(self, user_id: str, news_id: str, liked: int) -> dict[str, Any]:
+        # Resolve category first (needed for state vectors and pref update).
         with db_connect(self.db_path) as conn:
             news = conn.execute("SELECT category FROM news WHERE news_id = ?", (news_id,)).fetchone()
             if news is None:
                 raise ValueError(f"Unknown news_id: {news_id}")
             category = news["category"]
+
+        # Snapshot state BEFORE the preference write so the transition's
+        # `state` genuinely reflects the world prior to this poll signal.
+        state = self.build_state(user_id, category)
+
+        pref_delta: float
+        new_pref: float
+        with db_connect(self.db_path) as conn:
             row = conn.execute(
                 "SELECT preference, dislikes FROM user_category_prefs "
                 "WHERE user_id = ? AND category = ?",
                 (user_id, category),
             ).fetchone()
-            old_pref    = float(row["preference"]) if row else 0.2
-            old_dislikes = int(row["dislikes"])    if row else 0
-            pref_delta  = 0.10 if liked else -0.12
-            new_pref    = clamp(old_pref + pref_delta)
-            dislikes    = 0 if liked else old_dislikes + 1
-            agent       = self._agent(user_id)
+            old_pref     = float(row["preference"]) if row else 0.2
+            old_dislikes = int(row["dislikes"])      if row else 0
+            pref_delta   = 0.10 if liked else -0.12
+            new_pref     = clamp(old_pref + pref_delta)
+            dislikes     = 0 if liked else old_dislikes + 1
+            agent        = self._agent(user_id)
             blocked_until = (agent.step + 15) if (not liked and dislikes >= 2) else 0
             conn.execute(
                 """
@@ -844,14 +853,28 @@ class NewsRecommender:
                 """,
                 (user_id, category, new_pref, dislikes, blocked_until),
             )
+
+        # next_state: re-read with the updated preference already written.
+        next_state = self.build_state(user_id, category)
+
+        # Poll signals carry a lighter reward magnitude than full feedback
+        # (no dwell time or scroll data) but are still a genuine RL signal
+        # — the DDQN, Thompson Sampling, and UCB bandit all update here.
+        reward = 1.0 if liked else -1.0
+        agent.observe(state, category, reward, next_state, done=False, liked=bool(liked))
+        logger.debug(
+            "poll_feedback: user=%s news=%s category=%s liked=%s reward=%.2f buffer=%d",
+            user_id, news_id, category, liked, reward, len(agent.replay),
+        )
+
         return {
-            "user_id":   user_id,
-            "news_id":   news_id,
-            "category":  category,
-            "liked":     liked,
+            "user_id":    user_id,
+            "news_id":    news_id,
+            "category":   category,
+            "liked":      liked,
             "pref_delta": pref_delta,
-            "new_pref":  round(new_pref, 4),
-            "message":   "poll feedback applied",
+            "new_pref":   round(new_pref, 4),
+            "message":    "poll feedback applied",
         }
 
     # ──────────────────────────────────────────────────────

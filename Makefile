@@ -1,4 +1,4 @@
-.PHONY: help setup ingest ingest-force run test eval clean all
+.PHONY: help setup ingest ingest-force run test eval verify-rl check-icons clean all
 
 PYTHON ?= $(shell which python3.12 2>/dev/null || which python3)
 VENV ?= .venv
@@ -17,6 +17,8 @@ help:
 	@echo "  make run          - Start FastAPI recommender server on http://127.0.0.1:8000"
 	@echo "  make test         - Run pytest test suite"
 	@echo "  make eval         - Run evaluation harness on real catalog"
+	@echo "  make verify-rl    - Prove RL weights change with an isolated 60-interaction simulation"
+	@echo "  make check-icons  - Scan frontend for forbidden emoji/icons (also runs in make test)"
 	@echo "  make clean        - Remove cache and compiled files"
 	@echo "  make all          - Run setup, ingest, and test in one command"
 
@@ -47,6 +49,14 @@ test:
 eval:
 	@echo "Running recommender evaluation..."
 	@cd final && ../$(VENV_PYTHON) evaluation.py --users 5 --rounds 15
+
+verify-rl:
+	@echo "Running RL training verification (isolated temp DB, ~60 interactions)..."
+	@cd final && ../$(VENV_PYTHON) ../scripts/verify_rl_training.py
+
+check-icons:
+	@echo "Scanning frontend for forbidden emoji, icons, and SVG elements..."
+	@$(VENV_PYTHON) scripts/check_no_icons.py
 
 clean:
 	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

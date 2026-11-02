@@ -105,6 +105,15 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down")
     stop_ingest_scheduler()
     stop_background_attention()
+    # Flush any pending DDQN checkpoints synchronously before the process
+    # exits — without this, up to (save_interval - 1) gradient steps of
+    # training can be lost silently on Ctrl-C or SIGTERM.
+    for uid, agent in list(engine._agents.items()):
+        try:
+            agent.flush_save()
+            logger.info("Checkpoint flushed for user %s (step=%d)", uid, agent.step)
+        except Exception:
+            logger.exception("Checkpoint flush failed for user %s", uid)
 
 
 # ─────────────────────────────────────────────
@@ -861,8 +870,11 @@ def stop_attention():
 @app.get("/rl/metrics/{user_id}")
 def rl_metrics(user_id: str):
     """
-    Full RL dashboard payload for a user:
-      - DDQN step, epsilon, replay buffer size
+    Full RL dashboard payload for a user (developer endpoint — no auth required).
+
+    Fields:
+      - DDQN step, epsilon, replay buffer size, last training loss
+      - warmup_remaining: interactions until the first gradient step fires
       - HybridPolicy blend weight (DDQN vs Thompson Sampling)
       - Thompson Sampling expected reward + 95% CI per category
       - UCB visit counts and values per category
@@ -870,17 +882,20 @@ def rl_metrics(user_id: str):
     agent = engine._agent(user_id)
     cats  = agent.categories
     cis   = agent.hybrid.get_ts_confidence(cats)
+    warmup_remaining = max(0, agent.batch_size - len(agent.replay))
     return {
-        "user_id":        user_id,
-        "step":           agent.step,
-        "epsilon":        round(agent.epsilon, 4),
-        "replay_size":    len(agent.replay),
-        "ddqn_weight":    round(agent.hybrid.ddqn_weight(), 3),
-        "hybrid_step":    agent.hybrid.step,
-        "categories":     cats,
-        "ts_confidence":  cis,
-        "ucb_values":     [round(float(v), 4) for v in agent.hybrid.ucb.values],
-        "ucb_counts":     [int(c) for c in agent.hybrid.ucb.counts],
+        "user_id":          user_id,
+        "step":             agent.step,
+        "epsilon":          round(agent.epsilon, 4),
+        "replay_size":      len(agent.replay),
+        "warmup_remaining": warmup_remaining,
+        "last_loss":        round(agent.last_loss, 6) if agent.last_loss is not None else None,
+        "ddqn_weight":      round(agent.hybrid.ddqn_weight(), 3),
+        "hybrid_step":      agent.hybrid.step,
+        "categories":       cats,
+        "ts_confidence":    cis,
+        "ucb_values":       [round(float(v), 4) for v in agent.hybrid.ucb.values],
+        "ucb_counts":       [int(c) for c in agent.hybrid.ucb.counts],
     }
 
 

@@ -156,6 +156,7 @@ class DDQNAgent:
         self.replay       = ReplayBuffer(1000)
         self.step         = 0
         self.epsilon      = 0.15
+        self.last_loss: Optional[float] = None  # updated after every gradient step
 
         # Hybrid bandit policy (TS + UCB + Q-value blend)
         self.hybrid = HybridPolicy(self.action_dim)
@@ -366,9 +367,34 @@ class DDQNAgent:
         self.hybrid.update(action, reward, liked)
 
         loss = self.train_step()
+        if loss is not None:
+            self.last_loss = loss
         if self.step % self.save_interval == 0:
             self.save()
         return loss
+
+    # ── synchronous save for graceful shutdown ─────────────
+
+    def flush_save(self) -> None:
+        """Bypass the async queue and save synchronously.
+
+        Call this from a shutdown hook (e.g. FastAPI lifespan teardown or
+        ``atexit``) to ensure in-flight training progress is not lost when
+        the process exits between periodic checkpoint saves.
+        """
+        payload = {
+            "model":        self.model.state_dict(),
+            "target_model": self.target_model.state_dict(),
+            "optimizer":    self.optimizer.state_dict(),
+            "categories":   self.categories,
+            "step":         self.step,
+            "epsilon":      self.epsilon,
+            "hybrid":       self.hybrid.get_state(),
+        }
+        try:
+            self._do_save(payload)
+        except Exception:
+            logger.exception("DDQNAgent: flush_save failed for user %s", self.user_id)
 
     # ── metrics (for the dashboard) ───────────────────────
 
@@ -382,4 +408,5 @@ class DDQNAgent:
             "hybrid_step":   self.hybrid.step,
             "ts_expected":   [round(float(x), 4) for x in self.hybrid.ts.get_expected_reward()],
             "categories":    self.categories,
+            "last_loss":     round(self.last_loss, 6) if self.last_loss is not None else None,
         }
