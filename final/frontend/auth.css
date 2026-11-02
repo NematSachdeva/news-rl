@@ -31,14 +31,22 @@ body {
     z-index: 10;
 }
 
-.gradient-bg {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: #0e0e0d;
-    z-index: -1;
+/* .gradient-bg removed — replaced with plain body background */
+
+/* ─── Light mode support ─────────────────────────────────────────── */
+@media (prefers-color-scheme: light) {
+  body { background: #FAF9F6; color: #1A1917; }
+  .auth-card { background: #fff; border-color: #E2DED6; }
+  .form-group label { color: #1A1917; }
+  .form-group input { background: #FAF9F6; color: #1A1917; border-color: #C8C4BB; }
+  .form-group input:focus { background: #fff; }
+  .form-group input::placeholder { color: #8A8680; }
+  .btn-secondary { background-color: #fff; color: #1A1917; border-color: #C8C4BB; }
+  .btn-secondary:hover:not(:disabled) { background-color: #FAF9F6; border-color: #8A8680; }
+  .divider { color: #8A8680; }
+  .divider::before, .divider::after { background-color: #E2DED6; }
+  .divider span { color: #8A8680; }
+  .auth-footer p { color: #5C5851; }
 }
 
 /* ─── Card ──────────────────────────────────────────────────────── */

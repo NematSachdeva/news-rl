@@ -49,6 +49,32 @@ let currentLongTermHistory = 0.2; // updated from user profile on each load
 
 const $ = (id) => document.getElementById(id);
 
+// ─── Theme toggle ─────────────────────────────────────────────
+(function initTheme() {
+  const saved = localStorage.getItem('nf-theme');
+  if (saved) document.documentElement.setAttribute('data-theme', saved);
+})();
+
+function setupThemeToggle() {
+  const btn = $('themeToggle');
+  if (!btn) return;
+  function update() {
+    const current = document.documentElement.getAttribute('data-theme');
+    // If no explicit theme, detect from prefers-color-scheme
+    const isDark = current === 'dark' || (!current && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    btn.textContent = isDark ? 'Light mode' : 'Dark mode';
+  }
+  btn.addEventListener('click', () => {
+    const current = document.documentElement.getAttribute('data-theme');
+    const isDark = current === 'dark' || (!current && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    const next = isDark ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('nf-theme', next);
+    update();
+  });
+  update();
+}
+
 // ─── Toasts ─────────────────────────────────────────────────
 
 function showToast(message, kind = "info", duration = 3200) {
@@ -312,28 +338,28 @@ function selectedInterests() {
 // re-scores the feed toward mood-congruent categories immediately, then
 // decays back to neutral over a few hours if left untouched.
 const MOOD_OPTIONS = [
-  { key: "curious",   emoji: "🧐", label: "Curious" },
-  { key: "focused",   emoji: "🎯", label: "Focused" },
-  { key: "relaxed",   emoji: "😌", label: "Relaxed" },
-  { key: "energetic", emoji: "⚡", label: "Energetic" },
-  { key: "stressed",  emoji: "😤", label: "Stressed" },
-  { key: "tired",     emoji: "🥱", label: "Tired" },
-  { key: "busy",      emoji: "🏃", label: "Busy" },
-  { key: "happy",     emoji: "😊", label: "Happy" },
-  { key: "anxious",   emoji: "😰", label: "Anxious" },
+  { key: "curious",   label: "Curious" },
+  { key: "focused",   label: "Focused" },
+  { key: "relaxed",   label: "Relaxed" },
+  { key: "energetic", label: "Energetic" },
+  { key: "stressed",  label: "Stressed" },
+  { key: "tired",     label: "Tired" },
+  { key: "busy",      label: "Busy" },
+  { key: "happy",     label: "Happy" },
+  { key: "anxious",   label: "Anxious" },
 ];
 
 function renderMoodChips() {
   const container = $("moodChips");
   if (!container) return;
   container.innerHTML = "";
-  MOOD_OPTIONS.forEach(({ key, emoji, label }) => {
+  MOOD_OPTIONS.forEach(({ key, label }) => {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "mood-chip";
     chip.dataset.mood = key;
     if (key === userMood) chip.classList.add("active");
-    chip.append(document.createTextNode(`${emoji} ${label}`));
+    chip.textContent = label;
     chip.addEventListener("click", () => selectMood(key, label));
     container.appendChild(chip);
   });
@@ -685,7 +711,7 @@ function paintCardContent(item) {
   if (item.url && item.url !== "#") {
     urlEl.classList.remove("hidden");
     urlEl.href = item.url;
-    urlEl.textContent = item.source_name ? `Read on ${item.source_name} ↗` : "Read full article ↗";
+    urlEl.textContent = item.source_name ? `Read on ${item.source_name}` : "Read full article";
   } else {
     urlEl.classList.add("hidden");
   }
@@ -1321,7 +1347,7 @@ async function loadMeContent() {
         from.textContent = cat;
         const arrow = document.createElement("span");
         arrow.className = "me-related-arrow";
-        arrow.textContent = "→";
+        arrow.textContent = "";
         const to = document.createElement("span");
         to.className = "me-related-to";
         to.textContent = related[cat].join(", ");
@@ -1421,5 +1447,6 @@ async function updateCatalogStatus() {
 
 // ─── Init ─────────────────────────────────────────────────────
 
+setupThemeToggle();
 Promise.all([loadCategories(), loadUserIds(), updateCatalogStatus()]).catch(console.error);
 setInterval(updateCatalogStatus, 60000);
