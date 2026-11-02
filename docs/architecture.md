@@ -81,3 +81,41 @@ $$\text{Reward} = \pm 2.0_{\text{like/dislike}} + \Delta t_{\text{dwell}} + 0.50
   $$Y_t = r + \gamma \, Q(s', \arg\max_{a'} Q(s', a'; \theta); \theta^-)$$
 - Updates the primary network $\theta$ via Adam optimizer with gradient clipping at $1.0$, periodically updating target network $\theta^-$ every 20 steps.
 
+---
+
+## 4. Interaction Paths & Persistence Lifecycle
+
+### Full Feedback (`POST /feedback`)
+1. Pre-state $s$ is captured before database mutations (using `graph_scores_before`, previous session like rates, and current Thompson Sampling expectations).
+2. Interaction and graph edges are recorded in SQLite.
+3. Post-state $s'$ is computed with updated graph scores and preferences.
+4. `agent.observe(s, category, reward, s', done=False, liked=bool(liked))` executes:
+   - Pushes transition to `ReplayBuffer(1000)`.
+   - Updates Thompson Sampling Beta distributions ($(\alpha, \beta)$ updated with decay $0.995$) and UCB1 visit counts/values.
+   - For interactions 1–15 (warmup), `train_step()` returns `None`.
+   - At interaction 16 and beyond, each feedback executes a synchronous mini-batch gradient step on 16 sampled transitions, updates `last_loss`, decrements $\epsilon$, and every 20 steps syncs target network weights.
+
+### Poll Feedback (`POST /poll_feedback`)
+- Previously, poll feedback only mutated category preference values in SQLite without notifying the RL agent.
+- **Fixed path**: Poll feedback snapshots pre-state $s$, writes the preference delta ($\pm 0.10 / -0.12$), re-reads post-state $s'$, and calls `agent.observe(s, category, reward=\pm 1.0, s')`, ensuring poll engagement also drives DDQN replay and bandit adaptation.
+
+### Checkpoint Persistence & Shutdown Flush
+- **Periodic Saves**: Triggered asynchronously every `save_interval = 20` gradient steps via a shared, bounded `ThreadPoolExecutor(max_workers=4)`.
+- **Shutdown Flush**: On application termination (Ctrl-C, SIGTERM, FastAPI lifespan shutdown), `flush_save()` is called on all active agents, executing a synchronous write directly to `models/ddqn_<user_id>.pt` to prevent loss of up to 19 unpersisted gradient steps.
+
+### Developer Diagnostics Endpoint
+- `GET /rl/metrics/{user_id}` exposes:
+  `user_id`, `step`, `epsilon`, `replay_size`, `warmup_remaining`, `last_loss`, `ddqn_weight`, `hybrid_step`, `categories`, `ts_confidence`, `ucb_values`, and `ucb_counts`.
+
+---
+
+## 5. Frontend Editorial Architecture & Zero-Icon Contract
+
+- **Typography Stack**: Google Fonts `Source Serif 4` (headlines, brand, kicker) + `Source Sans 3` (body, metadata, controls, buttons).
+- **Theme Variables**: CSS custom properties for `--bg`, `--paper`, `--border`, `--border2`, `--ink`, `--ink2`, `--muted`, and `--red` accent.
+- **Color Scheme Support**:
+  - Dark mode (`--bg: #0e0e0d`, `--paper: #1a1a18`, `--ink: #f1efe8`)
+  - Warm light mode (`--bg: #FAF9F6`, `--paper: #FFFFFF`, `--ink: #1A1917`)
+  - Auto-detected via `prefers-color-scheme` with manual toggle button (`#themeToggle`) persisting in `localStorage['nf-theme']`.
+- **Zero-Icon Policy**: No `<svg>` tags, no icon fonts, no emoji, and no directional symbols used as icons (`→`, `↗`, `×`, `⏱`, `🎯`, `🔥`, `🗞️`). Verified automatically by `scripts/check_no_icons.py` during `make test`.
+

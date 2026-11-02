@@ -25,13 +25,21 @@ Interactions yield an immediate reward in approximately `[-3.55, +4.25]`:
 
 ### 3. Online DDQN Training
 - Interactions are logged online and pushed to an experience replay buffer (capacity 1,000 transitions).
-- While the replay buffer has fewer than 16 samples, the agent observes without gradient steps.
-- Once $\ge 16$ transitions exist, every interaction triggers an online mini-batch update (batch size 16) with target network synchronization every 20 steps and epsilon exploration decay.
-- Checkpoints are saved periodically to local disk in a background executor pool.
+- While the replay buffer has fewer than 16 samples, the agent observes without gradient steps (warmup phase). Thompson Sampling and UCB policies update immediately.
+- Once $\ge 16$ transitions exist (interaction 16 onward), every interaction triggers an online mini-batch update (batch size 16) with target network synchronization every 20 steps and epsilon exploration decay.
+- Both full feedback (`POST /feedback`) and poll signals (`POST /poll_feedback`) feed the RL agent.
+- Checkpoints are saved periodically in a background executor pool and flushed synchronously on application shutdown (`flush_save()`).
+- Developers can inspect live RL state via `GET /rl/metrics/{user_id}` (`last_loss`, `warmup_remaining`, `replay_size`, `epsilon`, etc.).
 
 ### 4. Attention & Physical Signals (Graceful Fallback)
 - Optional server-side webcam attention tracking (OpenCV + MediaPipe FaceMesh) measures eye openness, gaze, and head movement.
 - When `NEUROFEED_ENABLE_WEBCAM_ATTENTION=false` (default) or when no camera device is available, the system falls back gracefully to neutral attention ($0.5$), ensuring zero disruption.
+
+### 5. Professional Typography-First UI (Zero Icons)
+- Newspaper/editorial broadsheet design with Source Serif 4 headlines and Source Sans 3 interface type.
+- Zero icons: no SVGs, no emoji, no pictographs, no icon fonts. All controls use precise language ("Useful", "Not interested", "Next article", "Read full article", "Close").
+- Light and dark theme support (`prefers-color-scheme` + manual text toggle).
+- Enforced at test time with `make check-icons` and automated pytest verification.
 
 ---
 
@@ -151,7 +159,21 @@ cd final && ../.venv/bin/python -m news_ingest.run --provider newsdata --countri
 make test
 # or: cd final && ../.venv/bin/pytest -v
 ```
-All 121 tests cover API endpoints, real news ingestion, deduplication, category mapping, authentication, cache, graph memory, reading history, live news, mood affinities, rate limiting, recommender scoring, and bandit policies.
+All 140 tests cover API endpoints, real news ingestion, deduplication, category mapping, authentication, cache, graph memory, reading history, live news, mood affinities, rate limiting, recommender scoring, bandit policies, online DDQN learning & warmup boundaries, and the strict zero-icons frontend enforcement.
+
+### Verify RL Online Learning
+Runs a 60-interaction proof against an isolated temporary database, demonstrating that network weights remain unchanged through warmup (steps 1–15), begin learning at interaction 16, tilt Q-values toward preferred categories, and restore accurately across checkpoint reloads:
+```bash
+make verify-rl
+# or: cd final && ../.venv/bin/python ../scripts/verify_rl_training.py
+```
+
+### Scan Frontend for Icon Violations
+Scans all frontend HTML, CSS, and JS files for forbidden emoji, SVG elements, icon-font classes, and icon libraries:
+```bash
+make check-icons
+# or: .venv/bin/python scripts/check_no_icons.py
+```
 
 ### Run Recommender Evaluation Harness
 Simulates 5 distinct users reading recommendations across 15 interaction rounds:
