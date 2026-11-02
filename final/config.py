@@ -12,6 +12,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parent
@@ -20,7 +21,7 @@ ROOT = Path(__file__).resolve().parent
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NEUROFEED_",
-        env_file=".env",
+        env_file=(str(ROOT.parent / ".env"), str(ROOT / ".env"), ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -91,6 +92,23 @@ class Settings(BaseSettings):
     # 100 requests/day; one refresh = one request, so 90 min (16/day) stays
     # well under that with room for manual restarts.
     news_live_cache_ttl_seconds: float = 5400.0
+
+    # ── Real News Ingestion (NewsData.io) ───────────────────
+    # Free tier key at https://newsdata.io (200 credits/day).
+    # Configurable via NEWSDATA_API_KEY in .env or environment variable.
+    newsdata_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("NEWSDATA_API_KEY", "NEUROFEED_NEWSDATA_API_KEY"),
+    )
+    newsdata_base_url: str = "https://newsdata.io/api/1/latest"
+    newsdata_daily_credit_limit: int = 180
+    news_ingest_countries: str = "in,us,gb"
+    news_ingest_categories: str = "top,world,technology,business,sports"
+    news_ingest_languages: str = "en"
+    news_ingest_since: str = "48h"
+    news_ingest_interval_hours: float = 0.0
+    news_recency_days: int = 7
+    use_synthetic_data: bool = True
 
     @property
     def cors_origin_list(self) -> list[str]:

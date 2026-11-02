@@ -1,0 +1,46 @@
+{
+  "app_categories": [
+    "business",
+    "education",
+    "entertainment",
+    "health",
+    "lifestyle",
+    "politics",
+    "science",
+    "sports",
+    "technology",
+    "world"
+  ],
+  "direct_mapping": {
+    "business": "business",
+    "education": "education",
+    "entertainment": "entertainment",
+    "health": "health",
+    "lifestyle": "lifestyle",
+    "politics": "politics",
+    "science": "science",
+    "sports": "sports",
+    "technology": "technology",
+    "world": "world",
+    "environment": "science",
+    "crime": "politics",
+    "domestic": "politics",
+    "food": "lifestyle",
+    "tourism": "lifestyle",
+    "crypto": "business",
+    "market": "business",
+    "top": null
+  },
+  "priority_order": [
+    "technology",
+    "science",
+    "business",
+    "sports",
+    "entertainment",
+    "health",
+    "politics",
+    "education",
+    "lifestyle",
+    "world"
+  ]
+}

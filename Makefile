@@ -1,4 +1,4 @@
-.PHONY: help setup seed run test eval clean all
+.PHONY: help setup seed ingest run test eval clean all
 
 PYTHON ?= $(shell which python3.12 2>/dev/null || which python3)
 VENV ?= .venv
@@ -13,6 +13,7 @@ help:
 	@echo "Available commands:"
 	@echo "  make setup     - Create virtualenv and install dependencies"
 	@echo "  make seed      - Seed synthetic news & user data into SQLite"
+	@echo "  make ingest    - Ingest real news from NewsData.io into SQLite"
 	@echo "  make run       - Start FastAPI recommender server on http://127.0.0.1:8000"
 	@echo "  make test      - Run pytest test suite"
 	@echo "  make eval      - Run evaluation harness (5 users x 15 rounds)"
@@ -29,6 +30,10 @@ setup:
 seed:
 	@echo "Seeding demo dataset into SQLite..."
 	@cd final && ../$(VENV_PYTHON) scripts/seed_demo_data.py --import
+
+ingest:
+	@echo "Ingesting real news from NewsData.io..."
+	@cd final && ../$(VENV_PYTHON) -m news_ingest.run
 
 run:
 	@echo "Starting NeuroFeed server on http://127.0.0.1:8000..."

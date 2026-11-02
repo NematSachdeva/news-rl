@@ -38,6 +38,11 @@ from auth import (
     init_auth_db, signup_user, login_user, verify_token,
     get_user_by_id, revoke_token,
 )
+from news_ingest.scheduler import (
+    first_run_ingest_if_needed,
+    start_ingest_scheduler,
+    stop_ingest_scheduler,
+)
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -88,10 +93,16 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Webcam attention disabled (NEUROFEED_ENABLE_WEBCAM_ATTENTION=false)")
 
+    # Real news auto-ingestion & periodic scheduler
+    start_ingest_scheduler(settings)
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, first_run_ingest_if_needed, settings)
+
     asyncio.ensure_future(_warmup())
     yield
 
     logger.info("Shutting down")
+    stop_ingest_scheduler()
     stop_background_attention()
 
 
@@ -425,6 +436,26 @@ def metrics():
 @app.post("/import_data")
 def import_data(force: bool = False):
     return import_csvs(DB_PATH, force=force)
+
+
+@app.post("/news/ingest")
+def trigger_ingest(
+    countries: str = "in,us,gb",
+    categories: str = "top,world,technology,business,sports",
+    max_articles: int = 40,
+):
+    from news_ingest.run import run_ingest
+
+    c_list = [c.strip() for c in countries.split(",") if c.strip()]
+    cat_list = [c.strip() for c in categories.split(",") if c.strip()]
+    counts = run_ingest(
+        provider_name="newsdata",
+        countries=c_list,
+        categories=cat_list,
+        max_articles=max_articles,
+        refit_nlp=True,
+    )
+    return {"status": "ok", "counts": counts}
 
 
 @app.get("/categories")

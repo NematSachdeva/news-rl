@@ -639,6 +639,26 @@ function paintCardContent(item) {
     : item.abstract || item.news_id;
   $("abstract").textContent = item.abstract || item.full_article || "No summary available.";
 
+  // Byline: publisher source name & publication recency
+  const bylineEl = $("byline") || document.querySelector(".byline");
+  if (bylineEl) {
+    bylineEl.textContent = (item.source_name || "NEUROFEED DESK").toUpperCase();
+  }
+  const timerEl = $("readTimer");
+  if (timerEl && item.published_at) {
+    const pubDate = new Date(item.published_at);
+    if (!isNaN(pubDate.getTime())) {
+      const diffHours = Math.round((Date.now() - pubDate.getTime()) / (1000 * 60 * 60));
+      if (diffHours >= 24) {
+        timerEl.textContent = `${Math.round(diffHours / 24)}d ago`;
+      } else if (diffHours > 0) {
+        timerEl.textContent = `${diffHours}h ago`;
+      } else {
+        timerEl.textContent = "just now";
+      }
+    }
+  }
+
   // Stats row — real article metadata, not invented engagement numbers.
   // ~200 wpm is a standard average adult reading speed estimate.
   const minutes = Math.max(1, Math.round(Number(item.article_length || 0) / 200));
@@ -653,8 +673,13 @@ function paintCardContent(item) {
   if (trendingEl) trendingEl.classList.toggle("hidden", !(Number(item.trending) > 0.5));
 
   const urlEl = $("url");
-  if (item.url) { urlEl.classList.remove("hidden"); urlEl.href = item.url; }
-  else          { urlEl.classList.add("hidden"); }
+  if (item.url && item.url !== "#") {
+    urlEl.classList.remove("hidden");
+    urlEl.href = item.url;
+    urlEl.textContent = item.source_name ? `Read on ${item.source_name} ↗` : "Read full article ↗";
+  } else {
+    urlEl.classList.add("hidden");
+  }
 
   renderQueue();
   resetTimer();

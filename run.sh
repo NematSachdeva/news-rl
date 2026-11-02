@@ -20,6 +20,10 @@ case "$cmd" in
     echo "==> Seeding database..."
     (cd final && ../.venv/bin/python scripts/seed_demo_data.py --import)
     ;;
+  ingest)
+    echo "==> Ingesting real news from NewsData.io..."
+    (cd final && ../.venv/bin/python -m news_ingest.run)
+    ;;
   test)
     echo "==> Running tests..."
     (cd final && ../.venv/bin/pytest -v)
@@ -39,7 +43,7 @@ case "$cmd" in
     echo "==> Ready! Run './run.sh' to start."
     ;;
   *)
-    echo "Usage: $0 {setup|seed|run|test|eval|all}"
+    echo "Usage: $0 {setup|seed|ingest|run|test|eval|all}"
     exit 1
     ;;
 esac

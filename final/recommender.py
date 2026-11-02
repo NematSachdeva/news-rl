@@ -103,23 +103,35 @@ class NewsRecommender:
         return agent
 
     # ──────────────────────────────────────────────────────
-    #  NLP engine initialisation
+    #  NLP engine initialisation & dynamic refit
     # ──────────────────────────────────────────────────────
 
     def _ensure_nlp(self) -> None:
         if self._nlp_fitted:
             return
+        self.refit_nlp()
+
+    def refit_nlp(self) -> None:
+        """
+        Refit the NLP engine on the current news catalog (is_live=0) without
+        blocking active requests. Builds the new index and performs an atomic swap.
+        """
         try:
             with db_connect(self.db_path) as conn:
                 rows = conn.execute(
-                    "SELECT news_id, category, subcategory, abstract FROM news LIMIT 20000"
+                    "SELECT news_id, category, subcategory, abstract FROM news WHERE is_live = 0 LIMIT 20000"
                 ).fetchall()
+            if not rows:
+                return
             corpus  = [f"{r['category']} {r['subcategory']} {r['abstract']}" for r in rows]
             doc_ids = [r["news_id"] for r in rows]
-            self._nlp.fit(corpus, doc_ids)
+            new_nlp = EnhancedNLPEngine(n_lsa=self._nlp.n_lsa)
+            new_nlp.fit(corpus, doc_ids)
+            self._nlp = new_nlp
             self._nlp_fitted = True
+            logger.info("Refitted NLP index with %d documents.", len(doc_ids))
         except Exception as exc:
-            logger.warning("NLP engine init failed: %s", exc)
+            logger.warning("NLP engine refit failed: %s", exc)
 
     # ──────────────────────────────────────────────────────
     #  State builder  (11-D)
@@ -300,7 +312,9 @@ class NewsRecommender:
         COLS = (
             "news.news_id, news.category, news.subcategory, news.location,"
             " news.preferred_time, news.age_group, news.article_length,"
-            " news.abstract, news.full_article, news.url"
+            " news.abstract, news.full_article, news.url,"
+            " COALESCE(news.source_name, '') AS source_name,"
+            " COALESCE(news.published_at, '') AS published_at"
         )
 
         # Pool composition: normal vs. force-trending
@@ -326,7 +340,8 @@ class NewsRecommender:
                     " LEFT JOIN user_category_prefs ucp"
                     "   ON ucp.user_id = ? AND ucp.category = news.category"
                     f" WHERE {base_filter}"
-                    " ORDER BY COALESCE(ucp.preference, 0.2) DESC, RANDOM()"
+                    " ORDER BY (CASE WHEN news.news_id LIKE 'real_%' OR news.news_id LIKE 'nd_%' THEN 1 ELSE 0 END) DESC,"
+                    "          COALESCE(ucp.preference, 0.2) DESC, RANDOM()"
                     " LIMIT ?"
                 )
                 params = [user_id] + base_params + [max(25, count * 3)]
@@ -335,12 +350,17 @@ class NewsRecommender:
                     f"SELECT {COLS} FROM news"
                     " LEFT JOIN category_stats cs ON cs.category = news.category"
                     f" WHERE {base_filter}"
-                    " ORDER BY COALESCE(cs.trending_score, 0) DESC, RANDOM()"
+                    " ORDER BY (CASE WHEN news.news_id LIKE 'real_%' OR news.news_id LIKE 'nd_%' THEN 1 ELSE 0 END) DESC,"
+                    "          COALESCE(cs.trending_score, 0) DESC, RANDOM()"
                     " LIMIT ?"
                 )
                 params = base_params + [max(25, count * 3)]
             else:
-                sql = f"SELECT {COLS} FROM news WHERE {base_filter} ORDER BY RANDOM() LIMIT ?"
+                sql = (
+                    f"SELECT {COLS} FROM news WHERE {base_filter}"
+                    " ORDER BY (CASE WHEN news.news_id LIKE 'real_%' OR news.news_id LIKE 'nd_%' THEN 1 ELSE 0 END) DESC,"
+                    "          RANDOM() LIMIT ?"
+                )
                 params = base_params + [max(25, count * 3)]
 
             added = 0
@@ -378,9 +398,10 @@ class NewsRecommender:
                 exc_sql = ",".join("?" for _ in exclude) or "''"
                 for row in conn.execute(
                     f"SELECT news_id, category, subcategory, location, preferred_time,"
-                    f" age_group, article_length, abstract, full_article, url"
+                    f" age_group, article_length, abstract, full_article, url,"
+                    f" COALESCE(source_name, '') AS source_name, COALESCE(published_at, '') AS published_at"
                     f" FROM news WHERE category = ? AND is_live = 0 AND news_id NOT IN ({exc_sql})"
-                    f" ORDER BY RANDOM() LIMIT ?",
+                    f" ORDER BY (CASE WHEN news_id LIKE 'real_%' OR news_id LIKE 'nd_%' THEN 1 ELSE 0 END) DESC, RANDOM() LIMIT ?",
                     [cat, *exclude, per_category],
                 ).fetchall():
                     rows.append(dict(row))
@@ -1133,7 +1154,8 @@ class NewsRecommender:
             sections = []
             for c in cat_rows:
                 article_rows = conn.execute(
-                    "SELECT news_id, category, abstract, full_article, url "
+                    "SELECT news_id, category, abstract, full_article, url, "
+                    "COALESCE(source_name, '') AS source_name, COALESCE(published_at, '') AS published_at "
                     "FROM news WHERE category = ? AND is_live = 0 ORDER BY RANDOM() LIMIT ?",
                     (c["category"], articles_per_category),
                 ).fetchall()
@@ -1142,11 +1164,13 @@ class NewsRecommender:
                     raw = a["full_article"] or a["abstract"] or a["news_id"]
                     headline = raw.split(".")[0] if raw else a["news_id"]
                     articles.append({
-                        "news_id":  a["news_id"],
-                        "category": a["category"],
-                        "headline": headline,
-                        "abstract": a["abstract"] or "",
-                        "url":      a["url"] or "",
+                        "news_id":     a["news_id"],
+                        "category":    a["category"],
+                        "headline":    headline,
+                        "abstract":    a["abstract"] or "",
+                        "url":         a["url"] or "",
+                        "source_name": a["source_name"] or "",
+                        "published_at": a["published_at"] or "",
                     })
                 sections.append({
                     "category":       c["category"],

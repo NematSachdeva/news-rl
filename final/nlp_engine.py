@@ -145,20 +145,23 @@ class EnhancedNLPEngine:
         self._doc_ids = list(doc_ids)
         self._doc_id_to_idx = {d: i for i, d in enumerate(self._doc_ids)}
 
-        # TF-IDF
+        # TF-IDF (adaptive bounds so small or focused corpora don't prune all terms)
+        min_df = 2 if len(corpus) >= 50 else 1
+        max_df = 0.95 if len(corpus) >= 50 else 1.0
         self._tfidf = TfidfVectorizer(
             max_features=15_000,
             stop_words="english",
             ngram_range=(1, 3),
-            min_df=2,
-            max_df=0.95,
+            min_df=min_df,
+            max_df=max_df,
             sublinear_tf=True,
         )
         self._tfidf_matrix = self._tfidf.fit_transform(corpus)
         logger.info("TF-IDF fitted: %d docs, %d features", *self._tfidf_matrix.shape)
 
         # LSA (truncated SVD on TF-IDF)
-        n_comp = min(self.n_lsa, self._tfidf_matrix.shape[1] - 1)
+        max_valid_comp = min(self._tfidf_matrix.shape[0] - 1, self._tfidf_matrix.shape[1] - 1)
+        n_comp = max(1, min(self.n_lsa, max_valid_comp))
         self._svd = TruncatedSVD(n_components=n_comp, random_state=42)
         raw_lsa = self._svd.fit_transform(self._tfidf_matrix)
         self._lsa_matrix = normalize(raw_lsa)

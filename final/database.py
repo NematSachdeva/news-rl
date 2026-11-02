@@ -258,6 +258,8 @@ def init_db(db_path: Path = DB_PATH) -> None:
             "image_url":    "TEXT DEFAULT ''",
             "source_name":  "TEXT DEFAULT ''",
             "published_at": "TEXT DEFAULT ''",
+            "raw_categories": "TEXT DEFAULT ''",
+            "mapping_confidence": "REAL DEFAULT 1.0",
         }
         for col, definition in news_extra_cols.items():
             if col not in existing_news_cols:
