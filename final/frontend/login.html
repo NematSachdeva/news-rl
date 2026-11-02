@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0e0e0d">
+    <title>Login - NeuroFeed</title>
+    <link rel="stylesheet" href="auth.css">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <!-- Logo/Title -->
+            <div class="auth-header">
+                <h1 class="logo">NeuroFeed</h1>
+                <p class="tagline">News that reads you</p>
+            </div>
+
+            <!-- Login Form -->
+            <form id="loginForm" class="auth-form">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input 
+                        type="email" 
+                        id="email" 
+                        name="email" 
+                        placeholder="you@example.com"
+                        required
+                    >
+                    <span class="error-message" id="emailError"></span>
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input 
+                        type="password" 
+                        id="password" 
+                        name="password" 
+                        placeholder="••••••••"
+                        required
+                    >
+                    <span class="error-message" id="passwordError"></span>
+                </div>
+
+                <!-- General Error Message -->
+                <div class="error-message" id="generalError"></div>
+
+                <!-- Loading State -->
+                <button 
+                    type="submit" 
+                    id="loginBtn" 
+                    class="btn btn-primary btn-large"
+                >
+                    <span class="btn-text">Sign In</span>
+                    <span class="btn-loader"></span>
+                </button>
+            </form>
+
+            <!-- Divider -->
+            <div class="divider">
+                <span>or</span>
+            </div>
+
+            <!-- Continue as Guest -->
+            <button id="guestBtn" class="btn btn-secondary btn-large">
+                Continue as Guest
+            </button>
+
+            <!-- Signup Link -->
+            <div class="auth-footer">
+                <p>Don't have an account? <a href="signup.html" class="link">Sign up</a></p>
+                <p><a href="index.html" class="link">Back to App</a></p>
+            </div>
+        </div>
+
+        <!-- Background Gradient -->
+        <div class="gradient-bg"></div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="auth.js"></script>
+    <script src="login.js"></script>
+</body>
+</html>

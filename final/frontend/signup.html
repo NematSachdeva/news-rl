@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0e0e0d">
+    <title>Sign Up - NeuroFeed</title>
+    <link rel="stylesheet" href="auth.css">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <!-- Logo/Title -->
+            <div class="auth-header">
+                <h1 class="logo">NeuroFeed</h1>
+                <p class="tagline">News that reads you</p>
+            </div>
+
+            <!-- Signup Form -->
+            <form id="signupForm" class="auth-form">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input 
+                        type="text" 
+                        id="username" 
+                        name="username" 
+                        placeholder="Your display name"
+                        required
+                    >
+                    <span class="error-message" id="usernameError"></span>
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input 
+                        type="email" 
+                        id="email" 
+                        name="email" 
+                        placeholder="you@example.com"
+                        required
+                    >
+                    <span class="error-message" id="emailError"></span>
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input 
+                        type="password" 
+                        id="password" 
+                        name="password" 
+                        placeholder="••••••••"
+                        required
+                    >
+                    <span class="error-message" id="passwordError"></span>
+                    <div class="password-requirements">
+                        <small>• At least 8 characters</small>
+                        <small>• Mix of letters and numbers</small>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="confirmPassword">Confirm Password</label>
+                    <input 
+                        type="password" 
+                        id="confirmPassword" 
+                        name="confirmPassword" 
+                        placeholder="••••••••"
+                        required
+                    >
+                    <span class="error-message" id="confirmPasswordError"></span>
+                </div>
+
+                <!-- General Error Message -->
+                <div class="error-message" id="generalError"></div>
+
+                <!-- Loading State -->
+                <button 
+                    type="submit" 
+                    id="signupBtn" 
+                    class="btn btn-primary btn-large"
+                >
+                    <span class="btn-text">Create Account</span>
+                    <span class="btn-loader"></span>
+                </button>
+            </form>
+
+            <!-- Divider -->
+            <div class="divider">
+                <span>or</span>
+            </div>
+
+            <!-- Continue as Guest -->
+            <button id="guestBtn" class="btn btn-secondary btn-large">
+                Continue as Guest
+            </button>
+
+            <!-- Login Link -->
+            <div class="auth-footer">
+                <p>Already have an account? <a href="login.html" class="link">Sign in</a></p>
+                <p><a href="index.html" class="link">Back to App</a></p>
+            </div>
+        </div>
+
+        <!-- Background Gradient -->
+        <div class="gradient-bg"></div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="auth.js"></script>
+    <script src="signup.js"></script>
+</body>
+</html>
