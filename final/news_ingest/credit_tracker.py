@@ -95,3 +95,4 @@ class CreditTracker:
             credits, new_total, self.daily_limit, max(0, self.daily_limit - new_total),
         )
         return int(new_total)
+

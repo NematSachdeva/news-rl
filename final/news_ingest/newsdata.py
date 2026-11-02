@@ -254,3 +254,4 @@ class NewsDataProvider(BaseNewsProvider):
             image_url=image_url,
             content=content,
         )
+

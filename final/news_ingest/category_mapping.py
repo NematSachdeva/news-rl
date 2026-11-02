@@ -152,3 +152,4 @@ class CategoryMapper:
         # 4. Default safe category
         default_cat = "world" if "world" in self.app_categories else self.app_categories[0]
         return default_cat, 0.25
+

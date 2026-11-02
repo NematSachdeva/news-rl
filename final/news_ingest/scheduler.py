@@ -105,3 +105,4 @@ def stop_ingest_scheduler() -> None:
     if _SCHEDULER_THREAD:
         _SCHEDULER_THREAD.join(timeout=3.0)
         _SCHEDULER_THREAD = None
+

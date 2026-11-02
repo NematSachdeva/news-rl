@@ -41,3 +41,4 @@ class BaseNewsProvider(ABC):
         Implementations handle pagination, rate limiting, and credit budgeting.
         """
         pass
+

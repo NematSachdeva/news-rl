@@ -155,3 +155,4 @@ class NewsStorage:
                 "SELECT COUNT(*) FROM news WHERE is_live = 0 AND (news_id LIKE 'real_%' OR news_id LIKE 'nd_%')"
             ).fetchone()
             return int(row[0]) if row else 0
+
