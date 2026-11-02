@@ -114,14 +114,58 @@ def test_logout_revokes_the_token(api_client):
     assert after_logout.status_code == 401
 
 
-# ─── Security headers ──────────────────────────────────────────
+# ─── Security headers & CSP regression tests ───────────────────────
 
 def test_responses_carry_security_headers(api_client):
     resp = api_client.get("/health")
+    csp = resp.headers["Content-Security-Policy"]
     assert resp.headers["X-Content-Type-Options"] == "nosniff"
     assert resp.headers["X-Frame-Options"] == "DENY"
-    assert "script-src 'self'" in resp.headers["Content-Security-Policy"]
-    assert "unsafe-inline" not in resp.headers["Content-Security-Policy"].split("style-src")[0]
+
+    # script-src strictness: must be 'self' and never permit unsafe-inline or unsafe-eval
+    script_part = [p for p in csp.split(";") if "script-src" in p]
+    assert script_part, "Missing script-src directive in CSP"
+    assert "'self'" in script_part[0]
+    assert "unsafe-inline" not in script_part[0]
+    assert "unsafe-eval" not in script_part[0]
+
+    # connect-src strictness: must be 'self' without wildcards or hardcoded origins
+    connect_part = [p for p in csp.split(";") if "connect-src" in p]
+    assert connect_part, "Missing connect-src directive in CSP"
+    assert "'self'" in connect_part[0]
+    assert "*" not in connect_part[0]
+    assert "localhost" not in connect_part[0]
+    assert "127.0.0.1" not in connect_part[0]
+
+
+def test_frontend_has_no_hardcoded_localhost_api_urls():
+    """
+    Regression test: ensures no frontend code (.js or .html) hardcodes
+    localhost or 127.0.0.1 as an API destination or fallback, which breaks
+    when accessed from other origins under connect-src 'self'.
+    """
+    import re
+    from pathlib import Path
+
+    frontend_dir = Path(__file__).resolve().parents[1] / "frontend"
+    assert frontend_dir.is_dir(), f"Frontend dir not found: {frontend_dir}"
+
+    # Regex to strip JS comments: /* ... */ and // ...
+    comment_regex = re.compile(r"/\*.*?\*/|//[^\r\n]*", re.DOTALL)
+    origin_regex = re.compile(r"https?://(localhost|127\.0\.0\.1)", re.IGNORECASE)
+
+    violations = []
+    for file_path in frontend_dir.glob("*"):
+        if file_path.suffix not in (".js", ".html"):
+            continue
+        content = file_path.read_text(encoding="utf-8")
+        clean_code = comment_regex.sub("", content)
+
+        matches = origin_regex.findall(clean_code)
+        if matches:
+            violations.append(f"{file_path.name}: found hardcoded origins {matches}")
+
+    assert not violations, f"Hardcoded API host found in frontend code: {violations}"
 
 
 # ─── /auth/user/{id} PII leak fix ──────────────────────────────

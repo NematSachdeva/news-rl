@@ -3,7 +3,11 @@
 // config.js (window.NEUROFEED_API_BASE) and auth.js (isValidEmail /
 // setButtonLoading) loaded first.
 
-const API_BASE = window.NEUROFEED_API_BASE || '';
+const API_BASE = (typeof window !== "undefined" && window.NEUROFEED_API_BASE !== undefined)
+  ? window.NEUROFEED_API_BASE
+  : (typeof window !== "undefined" && window.location && window.location.origin && window.location.origin.startsWith("http")
+      ? window.location.origin
+      : "");
 
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();

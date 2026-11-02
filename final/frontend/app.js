@@ -1,7 +1,10 @@
-// Set by config.js (loaded before this file) — auto-detects localhost in
-// dev, points at the deployed backend (Render, etc.) in production. Never
-// hardcode a host here; edit config.js instead.
-const api = window.NEUROFEED_API_BASE || "http://localhost:8000";
+// Set by config.js (loaded before this file) — uses window.location.origin in
+// same-origin setups, or a configured override in split deployments.
+const api = (typeof window !== "undefined" && window.NEUROFEED_API_BASE !== undefined)
+  ? window.NEUROFEED_API_BASE
+  : (typeof window !== "undefined" && window.location && window.location.origin && window.location.origin.startsWith("http")
+      ? window.location.origin
+      : "");
 
 // ─── Authentication Check ──────────────────────────────────────
 
@@ -1399,7 +1402,7 @@ initHeroTilt();
 
 async function updateCatalogStatus() {
   try {
-    const res = await fetch("/news/status");
+    const res = await fetch(`${api}/news/status`);
     if (res.ok) {
       const data = await res.json();
       const el = $("catalogStatus");
