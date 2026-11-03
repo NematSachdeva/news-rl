@@ -95,15 +95,17 @@ async def lifespan(app: FastAPI):
         logger.info("Webcam attention disabled (NEUROFEED_ENABLE_WEBCAM_ATTENTION=false)")
 
     # Real news auto-ingestion & periodic scheduler
-    start_ingest_scheduler(settings)
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(None, startup_refresh_if_due, settings)
+    if settings.env != "test":
+        start_ingest_scheduler(settings)
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, startup_refresh_if_due, settings)
 
     asyncio.ensure_future(_warmup())
     yield
 
     logger.info("Shutting down")
-    stop_ingest_scheduler()
+    if settings.env != "test":
+        stop_ingest_scheduler()
     stop_background_attention()
     # Flush any pending DDQN checkpoints synchronously before the process
     # exits — without this, up to (save_interval - 1) gradient steps of
@@ -882,7 +884,8 @@ def rl_metrics(user_id: str):
     agent = engine._agent(user_id)
     cats  = agent.categories
     cis   = agent.hybrid.get_ts_confidence(cats)
-    warmup_remaining = max(0, agent.batch_size - len(agent.replay))
+    min_rep = getattr(agent, "min_replay", getattr(settings, "ddqn_min_replay", 8))
+    warmup_remaining = max(0, min_rep - len(agent.replay))
     return {
         "user_id":          user_id,
         "step":             agent.step,

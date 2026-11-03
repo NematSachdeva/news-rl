@@ -19,13 +19,18 @@ if str(ROOT) not in sys.path:
 # silently writing real accounts into the dev auth.sqlite.
 _TEST_DB_PATH = ROOT / "data" / f"test_{uuid.uuid4().hex[:8]}.sqlite"
 _TEST_AUTH_DB_PATH = ROOT / "data" / f"test_auth_{uuid.uuid4().hex[:8]}.sqlite"
+_TEST_MODEL_DIR = ROOT / "models" / f"test_{uuid.uuid4().hex[:8]}"
+_TEST_MODEL_DIR.mkdir(parents=True, exist_ok=True)
 os.environ["NEUROFEED_DB_PATH"] = str(_TEST_DB_PATH)
 os.environ["NEUROFEED_AUTH_DB_PATH"] = str(_TEST_AUTH_DB_PATH)
+os.environ["NEUROFEED_MODEL_DIR"] = str(_TEST_MODEL_DIR)
 os.environ["NEUROFEED_ENV"] = "test"
 os.environ["NEUROFEED_ENABLE_WEBCAM_ATTENTION"] = "false"
 os.environ["NEUROFEED_RATE_LIMIT_REQUESTS"] = "10000"  # tests shouldn't trip rate limiting
 os.environ["NEUROFEED_AUTH_RATE_LIMIT_REQUESTS"] = "10000"  # separate limiter on /auth/signup, /auth/login
 os.environ["NEUROFEED_LOGIN_MAX_FAILURES"] = "10000"  # tests deliberately trigger failed logins
+os.environ["NEWSDATA_API_KEY"] = ""  # never hit external news API in automated tests
+os.environ["NEUROFEED_NEWSDATA_API_KEY"] = ""
 
 from database import import_csvs  # noqa: E402
 from scripts.seed_demo_data import generate_news, generate_users, _rng  # noqa: E402
@@ -64,6 +69,9 @@ def _seeded_test_db():
     from ddqn_agent import _SAVE_EXECUTOR
 
     _SAVE_EXECUTOR.shutdown(wait=True)
+
+    import shutil
+    shutil.rmtree(_TEST_MODEL_DIR, ignore_errors=True)
 
     for path in (_TEST_DB_PATH, _TEST_AUTH_DB_PATH, news_csv, users_csv):
         path.unlink(missing_ok=True)

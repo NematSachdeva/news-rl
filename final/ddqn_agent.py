@@ -129,23 +129,26 @@ class DDQNAgent:
         self,
         categories: Optional[Sequence[str]] = None,
         user_id: str = "default",
-        gamma: float = 0.9,
+        gamma: Optional[float] = None,
         lr: float = 1e-3,
         batch_size: int = 16,
+        min_replay: Optional[int] = None,
         target_update: int = 20,
         save_interval: int = 20,
         db_path: Path = DB_PATH,
         model_dir: Optional[Path] = None,
     ) -> None:
         init_db(db_path)
+        settings = get_settings()
         self.db_path    = db_path
-        self.model_dir  = Path(model_dir) if model_dir is not None else get_settings().model_dir
+        self.model_dir  = Path(model_dir) if model_dir is not None else settings.model_dir
         self.model_dir.mkdir(parents=True, exist_ok=True)
         self.user_id    = user_id
         self.categories = list(categories or fetch_categories(db_path)) or ["general"]
         self.action_dim = len(self.categories)
-        self.gamma      = gamma
+        self.gamma      = gamma if gamma is not None else getattr(settings, "ddqn_gamma", 0.9)
         self.batch_size = batch_size
+        self.min_replay = min_replay if min_replay is not None else getattr(settings, "ddqn_min_replay", 8)
         self.target_update  = target_update
         self.save_interval  = save_interval
         self.device = torch.device("cpu")
@@ -311,10 +314,11 @@ class DDQNAgent:
     # ── training ──────────────────────────────────────────
 
     def train_step(self) -> Optional[float]:
-        if len(self.replay) < self.batch_size:
+        if len(self.replay) < self.min_replay:
             return None
 
-        batch  = self.replay.sample(self.batch_size)
+        batch_size = min(self.batch_size, len(self.replay))
+        batch  = self.replay.sample(batch_size)
         states = torch.tensor(np.array([t.state for t in batch]),      dtype=torch.float32)
         acts   = torch.tensor([t.action for t in batch],               dtype=torch.long).unsqueeze(1)
         rews   = torch.tensor([t.reward for t in batch],               dtype=torch.float32).unsqueeze(1)

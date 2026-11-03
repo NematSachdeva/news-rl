@@ -189,7 +189,7 @@ def run_verification() -> None:
         print("SUMMARY")
         print("─" * 60)
         print(f"  Interactions simulated:        {N_INTERACTIONS}")
-        print(f"  Warmup ends at interaction:    {warmup_interaction}  (expected: 16)")
+        print(f"  Warmup ends at interaction:    {warmup_interaction}  (expected: {agent.min_replay})")
         print(f"  First target sync at step:     {first_sync_interaction}")
         print(f"  Final DDQN gradient step:      {agent.step}")
         print(f"  Final ε:                       {agent.epsilon:.4f}")
@@ -247,7 +247,7 @@ def run_verification() -> None:
 
         # ── final verdict ──────────────────────────────────────────────────
         passed = (
-            warmup_interaction == 16
+            warmup_interaction == agent.min_replay
             and q_tech_final > q_biz_final
             and q_diff < 1e-4
             and agent2.step == agent.step

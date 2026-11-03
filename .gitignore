@@ -18,9 +18,12 @@ env/
 # Data & generated artifacts
 *.sqlite
 *.sqlite3
+*.sqlite-wal
+*.sqlite-shm
 *.csv
 *.log
 final/data/*.sqlite
+final/data/test_*
 final/data/cache/
 final/data/backups/
 final/models/*.pt

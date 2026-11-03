@@ -73,60 +73,63 @@ def _simulate(agent: DDQNAgent, n: int, category: str, reward: float, liked: boo
 
 
 class TestWarmupBoundary:
-    """Interactions 1-15 must NOT change DDQN weights; interaction 16 must."""
+    """Interactions 1 to min_replay-1 must NOT change DDQN weights; min_replay must."""
 
     def test_weights_unchanged_during_warmup(self, tmp_path: Path):
         agent = _mk_agent(tmp_path)
+        min_rep = agent.min_replay
         norm_before = _weight_norm(agent)
 
-        for i in range(1, 16):   # interactions 1–15
+        for i in range(1, min_rep):   # interactions 1..(min_rep-1)
             loss = agent.observe(_neutral(), TECH, 1.0, _neutral(), done=False, liked=True)
             assert loss is None, f"Unexpected gradient step at interaction {i}"
             assert agent.step == 0, f"step incremented before warmup ended at interaction {i}"
 
         norm_after = _weight_norm(agent)
         assert norm_before == pytest.approx(norm_after, rel=1e-6), (
-            "DDQN weights changed during warmup (interactions 1–15)"
+            f"DDQN weights changed during warmup (interactions 1..{min_rep - 1})"
         )
 
-    def test_first_gradient_step_at_interaction_16(self, tmp_path: Path):
+    def test_first_gradient_step_at_min_replay(self, tmp_path: Path):
         agent = _mk_agent(tmp_path)
+        min_rep = agent.min_replay
 
-        for _ in range(15):
+        for _ in range(min_rep - 1):
             agent.observe(_neutral(), TECH, 1.0, _neutral(), done=False, liked=True)
 
-        assert agent.step == 0, "step should still be 0 after 15 interactions"
+        assert agent.step == 0, f"step should still be 0 after {min_rep - 1} interactions"
 
-        # Interaction 16 must trigger the first gradient step
+        # Interaction min_rep must trigger the first gradient step
         loss = agent.observe(_neutral(), TECH, 1.0, _neutral(), done=False, liked=True)
-        assert loss is not None, "No gradient step at interaction 16 — buffer has 16 samples"
+        assert loss is not None, f"No gradient step at interaction {min_rep} — buffer has {min_rep} samples"
         assert agent.step == 1, f"step should be 1 after first gradient step, got {agent.step}"
 
     def test_weights_change_after_warmup(self, tmp_path: Path):
         agent = _mk_agent(tmp_path)
-        _simulate(agent, 15, TECH, 1.0, liked=True)    # fill buffer, no grad
+        min_rep = agent.min_replay
+        _simulate(agent, min_rep - 1, TECH, 1.0, liked=True)    # fill buffer, no grad
         norm_before = _weight_norm(agent)
 
-        # 16th interaction triggers first gradient step
+        # min_rep-th interaction triggers first gradient step
         agent.observe(_neutral(), TECH, 1.0, _neutral(), done=False, liked=True)
         norm_after = _weight_norm(agent)
 
         # With gradient descent the norm will change unless the gradient
         # happens to be zero (extremely unlikely with random weights + real loss)
         assert norm_before != pytest.approx(norm_after, rel=1e-7), (
-            "DDQN weights did NOT change after first gradient step at interaction 16"
+            f"DDQN weights did NOT change after first gradient step at interaction {min_rep}"
         )
 
 
 class TestLastLoss:
     def test_last_loss_is_none_during_warmup(self, tmp_path: Path):
         agent = _mk_agent(tmp_path)
-        _simulate(agent, 15, TECH, 1.0, liked=True)
+        _simulate(agent, agent.min_replay - 1, TECH, 1.0, liked=True)
         assert agent.last_loss is None
 
     def test_last_loss_set_after_warmup(self, tmp_path: Path):
         agent = _mk_agent(tmp_path)
-        _simulate(agent, 16, TECH, 1.0, liked=True)
+        _simulate(agent, agent.min_replay, TECH, 1.0, liked=True)
         assert agent.last_loss is not None
         assert isinstance(agent.last_loss, float)
         assert agent.last_loss >= 0.0
@@ -215,7 +218,7 @@ class TestPollFeedbackReachesAgent:
     def test_poll_feedback_also_trains_after_warmup(self, tmp_path: Path):
         agent = _mk_agent(tmp_path)
         # Pre-fill buffer to just below the threshold
-        _simulate(agent, 15, TECH, 1.0, liked=True)
+        _simulate(agent, agent.min_replay - 1, TECH, 1.0, liked=True)
         assert agent.step == 0
 
         # One more observe (simulating fixed poll_feedback) should trigger training
