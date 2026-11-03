@@ -11,37 +11,50 @@
     "technology",
     "world"
   ],
+  "app_to_provider_categories": {
+    "business": ["business"],
+    "education": ["education"],
+    "entertainment": ["entertainment"],
+    "health": ["health"],
+    "lifestyle": ["lifestyle", "food", "tourism"],
+    "politics": ["politics", "domestic", "crime"],
+    "science": ["science", "environment"],
+    "sports": ["sports"],
+    "technology": ["technology"],
+    "world": ["world"]
+  },
   "direct_mapping": {
     "business": "business",
     "education": "education",
     "entertainment": "entertainment",
     "health": "health",
     "lifestyle": "lifestyle",
+    "food": "lifestyle",
+    "tourism": "lifestyle",
     "politics": "politics",
+    "domestic": "politics",
+    "crime": "politics",
     "science": "science",
+    "environment": "science",
     "sports": "sports",
     "technology": "technology",
     "world": "world",
-    "environment": "science",
-    "crime": "politics",
-    "domestic": "politics",
-    "food": "lifestyle",
-    "tourism": "lifestyle",
     "crypto": "business",
     "market": "business",
-    "top": null
+    "breaking": null,
+    "top": null,
+    "other": null
   },
   "priority_order": [
     "technology",
     "science",
+    "education",
+    "health",
     "business",
     "sports",
     "entertainment",
-    "health",
-    "politics",
-    "education",
     "lifestyle",
+    "politics",
     "world"
   ]
 }
-

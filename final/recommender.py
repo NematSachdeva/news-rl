@@ -409,6 +409,7 @@ class NewsRecommender:
         exclude_ids = exclude_ids or set()
         seen_news, _ = self._recent_memory(user_id)
         exclude = seen_news | exclude_ids
+        min_conf = float(getattr(self.settings, "news_category_min_confidence", 0.0) or 0.0)
         rows: list[dict] = []
         with db_connect(self.db_path) as conn:
             for cat in self.categories():
@@ -417,13 +418,16 @@ class NewsRecommender:
                 if category and cat != category:
                     continue
                 exc_sql = ",".join("?" for _ in exclude) or "''"
+                conf_sql = " AND COALESCE(mapping_confidence, 1.0) >= ?" if min_conf > 0 else ""
+                params = [cat, *exclude, min_conf, per_category] if min_conf > 0 else [cat, *exclude, per_category]
                 for row in conn.execute(
                     f"SELECT news_id, category, subcategory, location, preferred_time,"
                     f" age_group, article_length, abstract, full_article, url,"
-                    f" COALESCE(source_name, '') AS source_name, COALESCE(published_at, '') AS published_at"
-                    f" FROM news WHERE category = ? AND is_live = 0 AND news_id NOT IN ({exc_sql})"
+                    f" COALESCE(source_name, '') AS source_name, COALESCE(published_at, '') AS published_at,"
+                    f" COALESCE(mapping_confidence, 1.0) AS mapping_confidence"
+                    f" FROM news WHERE category = ? AND is_live = 0 AND news_id NOT IN ({exc_sql}){conf_sql}"
                     f" ORDER BY (CASE WHEN news_id LIKE 'real_%' OR news_id LIKE 'nd_%' THEN 1 ELSE 0 END) DESC, RANDOM() LIMIT ?",
-                    [cat, *exclude, per_category],
+                    params,
                 ).fetchall():
                     rows.append(dict(row))
                     exclude.add(row["news_id"])

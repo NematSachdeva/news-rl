@@ -105,6 +105,10 @@ def trigger_refresh_job(settings: Settings, force: bool = False) -> dict[str, An
 
     _IS_REFRESH_RUNNING = True
     try:
+        if getattr(settings, "env", "") == "test" and not force:
+            logger.info("Skipping real news refresh in test environment.")
+            return {"status": "test_env_skip", "refreshed": False}
+
         if not force:
             due, reason = is_refresh_due(
                 settings.db_path,
@@ -135,8 +139,9 @@ def trigger_refresh_job(settings: Settings, force: bool = False) -> dict[str, An
             categories=categories,
             languages=languages,
             since=getattr(settings, "news_ingest_since", "48h"),
-            max_articles=60,
+            target_per_category=getattr(settings, "news_ingest_target_per_category", 40),
             refit_nlp=True,
+            force=True,
         )
 
         # Successful ingest: record timestamp and prune expired articles
@@ -262,6 +267,8 @@ def get_ingest_status(settings: Settings) -> dict[str, Any]:
     # Query counts per category from SQLite
     cat_counts: dict[str, int] = {c: 0 for c in settings.categories}
     total_real = 0
+    oldest_art: str | None = None
+    newest_art: str | None = None
     with db_connect(settings.db_path) as conn:
         rows = conn.execute(
             """
@@ -277,6 +284,17 @@ def get_ingest_status(settings: Settings) -> dict[str, Any]:
             cat_counts[cat] = cnt
             total_real += cnt
 
+        date_row = conn.execute(
+            """
+            SELECT MIN(published_at) as oldest, MAX(published_at) as newest
+            FROM news
+            WHERE is_live = 0 AND published_at IS NOT NULL AND published_at != ''
+            """
+        ).fetchone()
+        if date_row:
+            oldest_art = date_row["oldest"] or None
+            newest_art = date_row["newest"] or None
+
     return {
         "status": "ok",
         "is_refresh_running": _IS_REFRESH_RUNNING,
@@ -287,5 +305,9 @@ def get_ingest_status(settings: Settings) -> dict[str, Any]:
         "feed_recency_days": getattr(settings, "feed_recency_days", 3),
         "total_articles": total_real,
         "categories": cat_counts,
+        "oldest_article_at": oldest_art,
+        "newest_article_at": newest_art,
+        "oldest_article_date": oldest_art,
+        "newest_article_date": newest_art,
         "last_error": _LAST_ERROR,
     }

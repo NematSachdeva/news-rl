@@ -106,6 +106,14 @@ class Settings(BaseSettings):
     news_ingest_categories: str = "business,education,entertainment,health,lifestyle,politics,science,sports,technology,world,top"
     news_ingest_languages: str = "en"
     news_ingest_since: str = "48h"
+    news_ingest_target_per_category: int = Field(
+        default=40,
+        validation_alias=AliasChoices("NEUROFEED_NEWS_INGEST_TARGET_PER_CATEGORY", "NEWS_INGEST_TARGET_PER_CATEGORY"),
+    )
+    news_category_min_confidence: float = Field(
+        default=0.50,
+        validation_alias=AliasChoices("NEUROFEED_NEWS_CATEGORY_MIN_CONFIDENCE", "NEWS_CATEGORY_MIN_CONFIDENCE"),
+    )
     news_ingest_interval_hours: float = 0.0
     refresh_interval_hours: float = Field(
         default=24.0,
@@ -118,6 +126,16 @@ class Settings(BaseSettings):
     max_article_age_days: int = Field(
         default=14,
         validation_alias=AliasChoices("NEUROFEED_MAX_ARTICLE_AGE_DAYS", "MAX_ARTICLE_AGE_DAYS"),
+    )
+
+    # ── RL Agent Tuning ─────────────────────────────────────
+    ddqn_min_replay: int = Field(
+        default=8,
+        validation_alias=AliasChoices("NEUROFEED_DDQN_MIN_REPLAY", "DDQN_MIN_REPLAY"),
+    )
+    ddqn_gamma: float = Field(
+        default=0.9,
+        validation_alias=AliasChoices("NEUROFEED_DDQN_GAMMA", "DDQN_GAMMA"),
     )
 
     @property

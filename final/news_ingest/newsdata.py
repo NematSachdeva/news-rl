@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any, List, Optional
 from urllib.parse import urlencode
@@ -18,14 +19,15 @@ from news_ingest.dedupe import compute_url_id
 logger = logging.getLogger(__name__)
 
 DEFAULT_API_URL = "https://newsdata.io/api/1/latest"
-MAX_ITEMS_PER_PARAM = 5  # NewsData free plan allows at most 5 countries/categories/languages
+MAX_ITEMS_PER_PARAM = 5  # NewsData free plan allows at most 5 items per query param
 
 
 class NewsDataProvider(BaseNewsProvider):
     """
     Provider adapter for NewsData.io (free tier compatible).
-    Enforces 5/5/5 query constraints, credit quotas, retry backoff,
-    disk caching, and category mapping.
+    Enforces per-category target queries, pagination, rate limit pacing
+    (30 requests / 15 minutes), credit budget limits, retry backoff,
+    disk caching, and semantic category mapping.
     """
 
     def __init__(
@@ -37,6 +39,8 @@ class NewsDataProvider(BaseNewsProvider):
         cache_dir: Path | None = None,
         cache_ttl_seconds: float = 7200.0,
         request_timeout: float = 12.0,
+        max_requests_per_15m: int = 28,  # Safe ceiling below 30 req / 15 min
+        min_request_interval: float = 1.0,  # Min delay between consecutive network calls
     ) -> None:
         self.api_key = api_key.strip()
         self.base_url = base_url
@@ -46,13 +50,17 @@ class NewsDataProvider(BaseNewsProvider):
         self.cache_ttl_seconds = cache_ttl_seconds
         self.request_timeout = request_timeout
 
+        self.max_requests_per_15m = max_requests_per_15m
+        self.min_request_interval = min_request_interval
+        self._network_request_times: deque[float] = deque()
+        self._last_request_time: float = 0.0
+
         if self.cache_dir:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _cache_path(self, params: dict[str, Any]) -> Path | None:
         if not self.cache_dir:
             return None
-        # Omit api key from cache key
         safe_params = {k: v for k, v in sorted(params.items()) if k != "apikey"}
         query_hash = hashlib.sha256(urlencode(safe_params).encode("utf-8")).hexdigest()[:24]
         return self.cache_dir / f"req_{query_hash}.json"
@@ -79,8 +87,33 @@ class NewsDataProvider(BaseNewsProvider):
         except Exception as exc:
             logger.debug("Failed writing cache to %s: %s", path, exc)
 
+    def _pace_request(self) -> None:
+        """Enforce 30 requests / 15 minutes rolling window and minimum delay."""
+        now = time.time()
+        # 1. Purge timestamps older than 15 minutes (900 seconds)
+        while self._network_request_times and (now - self._network_request_times[0]) > 900.0:
+            self._network_request_times.popleft()
+
+        # 2. Check rolling window ceiling
+        if len(self._network_request_times) >= self.max_requests_per_15m:
+            oldest = self._network_request_times[0]
+            sleep_needed = max(0.0, 900.0 - (now - oldest) + 1.5)
+            if sleep_needed > 0:
+                logger.warning(
+                    "Approaching NewsData.io rate limit (%d requests in 15m window). Pacing execution: sleeping %.1fs...",
+                    len(self._network_request_times),
+                    sleep_needed,
+                )
+                time.sleep(sleep_needed)
+                now = time.time()
+
+        # 3. Minimum delay between consecutive outbound calls
+        elapsed = now - self._last_request_time
+        if elapsed < self.min_request_interval:
+            time.sleep(self.min_request_interval - elapsed)
+
     def _execute_request(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Execute HTTP request with caching, quota checks, and exponential backoff."""
+        """Execute HTTP request with caching, credit limits, rate pacing, and backoff."""
         cache_file = self._cache_path(params)
         cached = self._read_cache(cache_file)
         if cached is not None:
@@ -94,9 +127,12 @@ class NewsDataProvider(BaseNewsProvider):
 
         if self.credit_tracker and not self.credit_tracker.can_consume(1):
             raise QuotaExceededError(
-                f"NewsData.io daily credit quota exhausted ({self.credit_tracker.get_credits_used_today()}/"
+                f"NewsData.io daily credit quota reached ({self.credit_tracker.get_credits_used_today()}/"
                 f"{self.credit_tracker.daily_limit}). Ingestion halted to protect quota."
             )
+
+        # Enforce rate pacing before contacting external API
+        self._pace_request()
 
         # Backoff retries for 429 (rate limits) and 5xx (transient errors)
         last_error = None
@@ -106,9 +142,11 @@ class NewsDataProvider(BaseNewsProvider):
                 full_params["apikey"] = self.api_key
 
                 resp = requests.get(self.base_url, params=full_params, timeout=self.request_timeout)
+                self._last_request_time = time.time()
+                self._network_request_times.append(self._last_request_time)
 
                 if resp.status_code == 429:
-                    wait_time = (2 ** attempt) * 1.5
+                    wait_time = (2 ** attempt) * 2.0
                     logger.warning("HTTP 429 Rate limit from NewsData.io; backing off %.1fs...", wait_time)
                     time.sleep(wait_time)
                     continue
@@ -125,7 +163,7 @@ class NewsDataProvider(BaseNewsProvider):
 
             except requests.RequestException as exc:
                 last_error = exc
-                wait_time = (2 ** attempt) * 1.0
+                wait_time = (2 ** attempt) * 1.5
                 logger.warning("NewsData.io request failed (attempt %d/3): %s", attempt + 1, exc)
                 time.sleep(wait_time)
 
@@ -137,81 +175,97 @@ class NewsDataProvider(BaseNewsProvider):
         categories: list[str] | None = None,
         languages: list[str] | None = None,
         since: str | None = None,
-        max_articles: int = 50,
+        max_articles: int | None = None,
+        target_per_category: int = 40,
     ) -> list[NormalizedArticle]:
         """
-        Fetch articles respecting 5/5/5 parameter limits, pagination,
-        and credit budget.
+        Fetch articles querying per app category with per-category pagination,
+        parameter limits (<= 5 items), rate pacing, and credit ceiling protection.
         """
-        req_countries = [c.strip().lower() for c in (countries or ["us"]) if c.strip()]
-        req_categories = [c.strip().lower() for c in (categories or ["top", "technology", "business", "sports", "world"]) if c.strip()]
+        req_countries = [c.strip().lower() for c in (countries or ["in", "us", "gb"]) if c.strip()]
         req_languages = [l.strip().lower() for l in (languages or ["en"]) if l.strip()]
 
-        # Chunk lists to respect <= 5 items per query
-        def chunk(lst: list[str], size: int) -> list[list[str]]:
-            return [lst[i:i + size] for i in range(0, len(lst), size)] or [[]]
-
-        country_chunks = chunk(req_countries, MAX_ITEMS_PER_PARAM)
-        category_chunks = chunk(req_categories, MAX_ITEMS_PER_PARAM)
-        language_chunks = chunk(req_languages, MAX_ITEMS_PER_PARAM)
+        app_cats = [c.strip().lower() for c in (categories or self.category_mapper.app_categories) if c.strip()]
 
         all_articles: list[NormalizedArticle] = []
         seen_ids: set[str] = set()
-        total_chunks = len(country_chunks) * len(category_chunks) * len(language_chunks)
-        chunk_idx = 0
+        short_categories: list[str] = []
 
-        for c_list in country_chunks:
-            for cat_list in category_chunks:
-                for lang_list in language_chunks:
-                    chunk_idx += 1
-                    if len(all_articles) >= max_articles:
-                        break
+        logger.info(
+            "Beginning balanced ingestion across %d categories (target: %d/cat, countries=%s)",
+            len(app_cats), target_per_category, req_countries[:MAX_ITEMS_PER_PARAM],
+        )
 
-                    remaining_chunks = total_chunks - chunk_idx + 1
-                    chunk_target = max(10, (max_articles - len(all_articles) + remaining_chunks - 1) // max(1, remaining_chunks))
-                    articles_this_chunk = 0
-                    page_token: str | None = None
+        for app_cat in app_cats:
+            if max_articles is not None and len(all_articles) >= max_articles:
+                logger.info("Reached overall max article cap (%d); finishing ingestion.", max_articles)
+                break
 
-                    while len(all_articles) < max_articles and articles_this_chunk < chunk_target:
-                        params: dict[str, Any] = {
-                            "size": 10,
-                        }
-                        if c_list:
-                            params["country"] = ",".join(c_list)
-                        if cat_list:
-                            params["category"] = ",".join(cat_list)
-                        if lang_list:
-                            params["language"] = ",".join(lang_list)
-                        if page_token:
-                            params["page"] = page_token
+            # Map app category to provider category list (e.g. lifestyle -> ['lifestyle', 'food', 'tourism'])
+            provider_cats = self.category_mapper.app_to_provider_categories.get(app_cat, [app_cat])
+            cat_param = ",".join(provider_cats[:MAX_ITEMS_PER_PARAM])
 
-                        try:
-                            data = self._execute_request(params)
-                        except QuotaExceededError as q_err:
-                            logger.warning("Ingestion stopped due to credit quota: %s", q_err)
-                            return all_articles
-                        except Exception as exc:
-                            logger.error("Failed fetching chunk (country=%s, cat=%s): %s", c_list, cat_list, exc)
+            articles_this_cat = 0
+            page_token: str | None = None
+            category_exhausted = False
+
+            while articles_this_cat < target_per_category and not category_exhausted:
+                if max_articles is not None and len(all_articles) >= max_articles:
+                    break
+
+                params: dict[str, Any] = {
+                    "size": 10,
+                    "category": cat_param,
+                }
+                if req_countries:
+                    params["country"] = ",".join(req_countries[:MAX_ITEMS_PER_PARAM])
+                if req_languages:
+                    params["language"] = ",".join(req_languages[:MAX_ITEMS_PER_PARAM])
+                if page_token:
+                    params["page"] = page_token
+
+                try:
+                    data = self._execute_request(params)
+                except QuotaExceededError as q_err:
+                    logger.warning("Daily credit quota reached while querying '%s': %s", app_cat, q_err)
+                    short_categories.append(app_cat)
+                    logger.info("Halting further requests and preserving %d fetched articles.", len(all_articles))
+                    return all_articles
+                except Exception as exc:
+                    logger.error("Failed querying category '%s' (params=%s): %s", app_cat, params, exc)
+                    short_categories.append(app_cat)
+                    break
+
+                results = data.get("results", [])
+                if not results:
+                    category_exhausted = True
+                    break
+
+                new_in_page = 0
+                for raw in results:
+                    norm = self._normalize_article(raw)
+                    if norm.id not in seen_ids:
+                        seen_ids.add(norm.id)
+                        all_articles.append(norm)
+                        articles_this_cat += 1
+                        new_in_page += 1
+                        if max_articles is not None and len(all_articles) >= max_articles:
+                            break
+                        if articles_this_cat >= target_per_category:
                             break
 
-                        results = data.get("results", [])
-                        if not results:
-                            break
+                page_token = data.get("nextPage")
+                if not page_token or new_in_page == 0:
+                    category_exhausted = True
 
-                        for raw in results:
-                            norm = self._normalize_article(raw)
-                            if norm.id not in seen_ids:
-                                seen_ids.add(norm.id)
-                                all_articles.append(norm)
-                                articles_this_chunk += 1
-                                if len(all_articles) >= max_articles:
-                                    break
+            if articles_this_cat < target_per_category:
+                short_categories.append(f"{app_cat} ({articles_this_cat}/{target_per_category})")
+            logger.info("Category '%s': gathered %d articles (target: %d)", app_cat, articles_this_cat, target_per_category)
 
-                        page_token = data.get("nextPage")
-                        if not page_token:
-                            break
+        if short_categories:
+            logger.info("Categories below target: %s", ", ".join(short_categories))
 
-        return all_articles[:max_articles]
+        return all_articles
 
     def _normalize_article(self, raw: dict[str, Any]) -> NormalizedArticle:
         url = str(raw.get("link") or "").strip()
@@ -240,12 +294,10 @@ class NewsDataProvider(BaseNewsProvider):
             description=description,
         )
 
-        source = str(raw.get("source_name") or raw.get("source_id") or "NewsData").strip()
-        pub_date = str(raw.get("pubDate") or raw.get("pubDateTZ") or "").strip()
-
-        country_val = raw.get("country")
-        country = country_val[0] if isinstance(country_val, list) and country_val else str(country_val or "")
+        source_name = str(raw.get("source_id") or raw.get("source_name") or "").replace("_", " ").title()
+        country = str(raw.get("country", [""])[0] if isinstance(raw.get("country"), list) else raw.get("country") or "")
         language = str(raw.get("language") or "en")
+        pub_date = str(raw.get("pubDate") or raw.get("pubDateTZ") or "").strip()
         image_url = str(raw.get("image_url") or "").strip()
 
         return NormalizedArticle(
@@ -253,7 +305,7 @@ class NewsDataProvider(BaseNewsProvider):
             title=title,
             description=description,
             url=url,
-            source_name=source,
+            source_name=source_name,
             published_at=pub_date,
             country=country,
             language=language,
@@ -263,4 +315,3 @@ class NewsDataProvider(BaseNewsProvider):
             image_url=image_url,
             content=content,
         )
-

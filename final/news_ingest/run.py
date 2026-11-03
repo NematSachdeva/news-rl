@@ -29,12 +29,19 @@ def run_ingest(
     categories: list[str] | None = None,
     languages: list[str] | None = None,
     since: str = "48h",
-    max_articles: int = 60,
+    max_articles: int | None = None,
+    target_per_category: int | None = None,
     refit_nlp: bool = True,
     force: bool = False,
 ) -> dict[str, int]:
     settings = get_settings()
     init_db(settings.db_path)
+
+    target_per_cat = (
+        target_per_category
+        if target_per_category is not None
+        else getattr(settings, "news_ingest_target_per_category", 40)
+    )
 
     # 0. Check 24-hour refresh interval unless forced
     if not force:
@@ -84,8 +91,8 @@ def run_ingest(
 
     # 4. Fetch articles
     logger.info(
-        "Fetching news from %s (countries=%s, categories=%s, max=%d)...",
-        provider_name, countries, categories, max_articles,
+        "Fetching news from %s (countries=%s, categories=%s, target_per_cat=%d, max=%s)...",
+        provider_name, countries, categories, target_per_cat, max_articles,
     )
     articles = provider.fetch(
         countries=countries,
@@ -93,6 +100,7 @@ def run_ingest(
         languages=languages,
         since=since,
         max_articles=max_articles,
+        target_per_category=target_per_cat,
     )
 
     credits_after = credit_tracker.get_credits_used_today()
@@ -162,7 +170,13 @@ def main() -> None:
         help="Comma-separated language codes",
     )
     parser.add_argument("--since", default=getattr(settings, "news_ingest_since", "48h"), help="Timeframe window")
-    parser.add_argument("--max-articles", type=int, default=60, help="Max articles to fetch")
+    parser.add_argument(
+        "--target-per-category",
+        type=int,
+        default=getattr(settings, "news_ingest_target_per_category", 40),
+        help="Target articles to collect per category (default from settings or 40)",
+    )
+    parser.add_argument("--max-articles", type=int, default=None, help="Optional global max cap on articles")
     parser.add_argument("--no-refit-nlp", action="store_true", help="Skip refitting the NLP index")
     parser.add_argument("--force", action="store_true", help="Bypass 24-hour refresh interval check")
 
@@ -180,6 +194,7 @@ def main() -> None:
         languages=languages,
         since=args.since,
         max_articles=args.max_articles,
+        target_per_category=args.target_per_category,
         refit_nlp=not args.no_refit_nlp,
         force=args.force,
     )

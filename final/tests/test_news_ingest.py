@@ -221,7 +221,7 @@ def test_provider_pagination_and_disk_cache(tmp_path):
     with patch("requests.get", side_effect=[mock_resp_1, mock_resp_2]) as mock_get:
         articles = provider.fetch(
             countries=["us"],
-            categories=["technology", "sports", "business"],
+            categories=["technology"],
             max_articles=10,
         )
 
@@ -234,7 +234,7 @@ def test_provider_pagination_and_disk_cache(tmp_path):
     with patch("requests.get") as mock_get_2:
         cached_articles = provider.fetch(
             countries=["us"],
-            categories=["technology", "sports", "business"],
+            categories=["technology"],
             max_articles=10,
         )
         assert len(cached_articles) == 3
@@ -487,13 +487,16 @@ def test_preference_ordering_on_real_catalog(tmp_path):
     engine = NewsRecommender(db_path)
     engine.refit_nlp()
 
+    import uuid
+    uid = f"tech_fan_{uuid.uuid4().hex[:6]}"
+
     # (a) New user with declared interest in "technology"
     engine.onboard_user({
-        "user_id": "tech_fan",
+        "user_id": uid,
         "interests": ["technology"],
         "exploration_preference": 0.1,
     })
-    recs = engine.recommend("tech_fan", k=8)
+    recs = engine.recommend(uid, k=8)
 
     # Batch is returned (respecting diversity cap of <= 2 per category)
     assert len(recs["recommendations"]) >= 6
@@ -508,14 +511,14 @@ def test_preference_ordering_on_real_catalog(tmp_path):
     non_tech = next((r for r in recs["recommendations"] if r["category"] != "technology"), None)
     if non_tech is None:
         # Expand by requesting a bigger batch to find any non-tech article
-        wider = engine.recommend("tech_fan", k=32)
+        wider = engine.recommend(uid, k=32)
         non_tech = next((r for r in wider["recommendations"] if r["category"] != "technology"), None)
     assert non_tech is not None, "No non-technology article found in catalog — seed data problem"
     target_category = non_tech["category"]
 
     for _ in range(3):
         engine.feedback({
-            "user_id": "tech_fan",
+            "user_id": uid,
             "news_id": non_tech["news_id"],
             "liked": 1,
             "time_spent": 15.0,
@@ -523,7 +526,7 @@ def test_preference_ordering_on_real_catalog(tmp_path):
         })
 
     # Next recommendation: the liked category's affinity should rise
-    recs_after = engine.recommend("tech_fan", k=8)
+    recs_after = engine.recommend(uid, k=8)
     liked_cat_in_new_batch = any(r["category"] == target_category for r in recs_after["recommendations"])
     assert liked_cat_in_new_batch is True
     # The liked article itself is not repeated
