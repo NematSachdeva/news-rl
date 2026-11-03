@@ -48,7 +48,7 @@ test:
 
 eval:
 	@echo "Running recommender evaluation..."
-	@cd final && ../$(VENV_PYTHON) evaluation.py --users 5 --rounds 15
+	@cd final && ../$(VENV_PYTHON) evaluation.py --users 20 --rounds 20
 
 verify-rl:
 	@echo "Running RL training verification (isolated temp DB, ~60 interactions)..."

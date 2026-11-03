@@ -159,10 +159,10 @@ cd final && ../.venv/bin/python -m news_ingest.run --provider newsdata --countri
 make test
 # or: cd final && ../.venv/bin/pytest -v
 ```
-All 140 tests cover API endpoints, real news ingestion, deduplication, category mapping, authentication, cache, graph memory, reading history, live news, mood affinities, rate limiting, recommender scoring, bandit policies, online DDQN learning & warmup boundaries, and the strict zero-icons frontend enforcement.
+All 146 tests cover API endpoints, real news ingestion, deduplication, category mapping, authentication, cache, graph memory, reading history, live news, mood affinities, rate limiting, recommender scoring, bandit policies, online DDQN learning & warmup boundaries, 24-hour refresh lifecycle, and the strict zero-icons frontend enforcement.
 
 ### Verify RL Online Learning
-Runs a 60-interaction proof against an isolated temporary database, demonstrating that network weights remain unchanged through warmup (steps 1–15), begin learning at interaction 16, tilt Q-values toward preferred categories, and restore accurately across checkpoint reloads:
+Runs a 60-interaction proof against an isolated temporary database, demonstrating that network weights remain unchanged through warmup (interactions 1–7), begin learning at interaction 8 (`ddqn_min_replay=8`), tilt Q-values toward preferred categories, and restore accurately across checkpoint reloads:
 ```bash
 make verify-rl
 # or: cd final && ../.venv/bin/python ../scripts/verify_rl_training.py
@@ -176,16 +176,21 @@ make check-icons
 ```
 
 ### Run Recommender Evaluation Harness
-Simulates 5 distinct users reading recommendations across 15 interaction rounds:
+> **Note on Methodology**: This evaluation harness is an offline simulated-user sanity check (using standard replay/simulation patterns for interactive bandit recommenders). It verifies that ranking algorithms, reward ingestion, and cold-start transitions function end-to-end without regressions across multi-round sessions.
+
+Run across 20 simulated users x 20 rounds:
 ```bash
 make eval
-# or: cd final && ../.venv/bin/python evaluation.py --users 5 --rounds 15
+# or: cd final && ../.venv/bin/python evaluation.py --users 20 --rounds 20
 ```
 
-Observed run results:
-- **Precision@K (early rounds)**: 0.607
-- **Precision@K (late rounds)**: 0.657
-- **Learning Delta**: $+0.051$ (confirms precision increases within a session as RL learns).
+Multi-seed evaluation results across seeds `[42, 123, 999]` (20 users x 20 rounds, $k=8$):
+- **Precision@K**: $0.527 \pm 0.045$ (range: $[0.492, 0.577]$)
+- **NDCG@K**: $0.808 \pm 0.038$ (range: $[0.772, 0.847]$)
+- **Category Diversity**: $0.559 \pm 0.003$ (range: $[0.557, 0.562]$)
+- **Catalog Coverage**: $0.213 \pm 0.018$ (range: $[0.200, 0.234]$)
+- **Precision@K (early)**: $0.564 \pm 0.061$
+- **Precision@K (late)**: $0.476 \pm 0.044$
 
 ---
 
@@ -203,7 +208,14 @@ All settings can be configured via environment variables or a `.env` file at the
 | `NEUROFEED_COLD_START_INTERACTION_THRESHOLD` | `5` | Interaction count threshold before RL dominates scoring |
 | `NEUROFEED_MMR_LAMBDA` | `0.75` | Diversity trade-off factor ($1.0$ = relevance, $0.0$ = diversity) |
 | `NEWSDATA_API_KEY` | `""` | NewsData.io API key for real news ingestion |
-| `NEWSDATA_DAILY_CREDIT_LIMIT` | `180` | Safety ceiling for daily NewsData API credit usage |
-| `NEWSDATA_CATEGORIES` | `top,world,technology,business,sports` | Default comma-separated categories to fetch |
-| `NEWSDATA_COUNTRIES` | `in,us,gb` | Default comma-separated country codes |
+| `NEUROFEED_NEWSDATA_DAILY_CREDIT_LIMIT` | `180` | Safety ceiling for daily NewsData API credit usage |
+| `NEUROFEED_NEWS_INGEST_CATEGORIES` | `business,education,entertainment,health,lifestyle,politics,science,sports,technology,world,top` | Ingest categories |
+| `NEUROFEED_NEWS_INGEST_COUNTRIES` | `in,us,gb` | Target country codes |
+| `NEUROFEED_NEWS_INGEST_TARGET_PER_CATEGORY` | `40` | Ingestion target article count per category |
+| `NEUROFEED_NEWS_CATEGORY_MIN_CONFIDENCE` | `0.50` | Minimum classification confidence to admit articles into candidate pool |
+| `NEUROFEED_REFRESH_INTERVAL_HOURS` | `24.0` | Minimum hours between automatic background news refreshes |
+| `NEUROFEED_FEED_RECENCY_DAYS` | `3` | Preferred recency window for candidate retrieval |
+| `NEUROFEED_MAX_ARTICLE_AGE_DAYS` | `14` | Catalog retention before pruning unengaged articles |
+| `NEUROFEED_DDQN_MIN_REPLAY` | `8` | Minimum replay buffer samples before gradient steps fire |
+| `NEUROFEED_DDQN_GAMMA` | `0.9` | DDQN Bellman discount factor |
 | `NEUROFEED_NEWS_API_KEY` | `""` | NewsAPI.org API key for Live News bulletin (optional) |
