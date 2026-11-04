@@ -62,9 +62,9 @@ flowchart TD
     G --> H["agent.observe(s, a, r, s') in ddqn_agent.py"]
     H --> I["Push to ReplayBuffer (capacity: 1000)"]
     H --> J["Update Bandit Posterior (Thompson Sampling & UCB1)"]
-    H --> K{"len(replay) >= 16?"}
+    H --> K{"len(replay) >= min_replay (8)?"}
     K -- No --> L["Warmup: Loss is None"]
-    K -- Yes --> M["Sample batch of 16 -> Double DQN MSE Loss Update"]
+    K -- Yes --> M["Sample batch of min(16, N) -> Double DQN MSE Loss Update"]
     M --> N["Decay epsilon (0.995) & Sync Target Net every 20 steps"]
     N --> O["Background Checkpoint Save (models/ddqn_<user>.pt)"]
 ```
