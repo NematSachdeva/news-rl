@@ -1,20 +1,16 @@
 """
 Dueling Double DQN agent for news category selection.
 
-Changes vs. original:
-  * State dimension expanded 5 → 10 → 11 (richer context, most recently a
-    mood_affinity dimension — see build_state_from_row in recommender.py
-    and mood_signals.py)
+Key architecture features:
+  * 11-dimensional state context (including mood_affinity dimension — see
+    build_state_from_row in recommender.py and mood_signals.py)
   * Deeper network: 256 → 128 → (value / advantage heads)
   * LayerNorm after first layer for training stability
-  * HybridPolicy (Thompson Sampling + UCB) replaces plain ε-greedy
+  * HybridPolicy (Thompson Sampling + UCB) category selection
   * Hybrid policy state saved/loaded alongside model weights
-  * Graceful architecture-mismatch recovery (old 5-D/10-D → new 11-D) —
-    a per-user checkpoint saved under the old shape doesn't crash, it
-    just reinitializes for that user (see _load_or_init below); expanding
-    the state dimension trades a one-time reset of existing per-user
-    DDQN progress for a genuinely richer state going forward, not a free
-    change, and not one to make casually
+  * Graceful architecture-mismatch recovery (legacy shapes → 11-D) —
+    a per-user checkpoint saved under an older shape reinitializes cleanly
+    for that user (see _load_or_init below)
 """
 from __future__ import annotations
 

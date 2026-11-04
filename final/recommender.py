@@ -1,11 +1,11 @@
 """
 News recommendation engine.
 
-Key changes vs. original:
-  * EnhancedNLPEngine (BM25 + TF-IDF + LSA) replaces the bare TF-IDF vectorizer
+Key features:
+  * EnhancedNLPEngine (BM25 + TF-IDF + LSA ensemble)
   * UserInterestGraph (time-decayed knowledge graph) feeds graph_score into state
-  * State expanded to 10-D: adds graph_score, ts_reward, time_sin/cos, session_like_rate
-  * DDQNAgent now uses HybridPolicy (TS + UCB + Q-blend) for category selection
+  * 11-D state: adds graph_score, ts_reward, time_sin/cos, session_like_rate, mood_affinity
+  * DDQNAgent uses HybridPolicy (TS + UCB + Q-blend) for category selection
   * graph_memory.save_to_db() called on every feedback to persist the graph
 """
 from __future__ import annotations
@@ -274,7 +274,7 @@ class NewsRecommender:
         return {"user_id": user_id, "categories": categories, "message": "onboarded"}
 
     # ──────────────────────────────────────────────────────
-    #  Candidate retrieval (same 3-pool mix as original)
+    #  Candidate retrieval (3-pool candidate selection)
     # ──────────────────────────────────────────────────────
 
     def _fetch_candidates_conn(

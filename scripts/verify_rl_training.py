@@ -221,7 +221,7 @@ def run_verification() -> None:
         )
         q_tech_2, q_biz_2 = _q_vals(agent2)
         q_diff = abs(q_tech_2 - q_tech_final) + abs(q_biz_2 - q_biz_final)
-        print(f"  Original Q(tech)={q_tech_final:+.6f}  Q(biz)={q_biz_final:+.6f}")
+        print(f"  Pre-save Q(tech)={q_tech_final:+.6f}  Q(biz)={q_biz_final:+.6f}")
         print(f"  Reloaded Q(tech)={q_tech_2:+.6f}   Q(biz)={q_biz_2:+.6f}")
         print(f"  Total Q-value delta (should be ~0): {q_diff:.8f}")
         print(f"  Checkpoint reload: {'✓ PASS' if q_diff < 1e-4 else '✗ FAIL'}")

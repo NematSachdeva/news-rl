@@ -391,12 +391,10 @@ The simulation harness (`final/evaluation.py`) runs 20 simulated users across 20
 - **Secondary News Provider**: Add support for secondary news APIs (such as GNews or Currents) to expand catalog depth and improve per-category density.
 - **Smooth Policy Blending**: Replace the hard switch at 5 interactions with a sigmoid or logistic decay function to transition gradually from declared preferences to learned Q-values.
 - **Persistent Replay Buffer**: Optionally serialize the experience replay buffer to disk alongside PyTorch model checkpoints, allowing gradient updates to resume immediately upon restart.
-- **Deployment Infrastructure**: The `deploy/` directory contains configuration files for Docker, Docker Compose, Render, Netlify, and Vercel. These are preserved for future deployment work and are not in active use for local development.
+- **Deployment Infrastructure**: The `deploy/` directory contains configuration files for Docker, Docker Compose, Render, Netlify, and Vercel. These are provided for future deployment work and are not in active use for local development.
 
 ---
 
-## 14. Attribution and License
+## 14. Author
 
-NeuroFeed is based on the open-source base project [News-Recommender](https://github.com/Dracula-5/News-Recommender) by Dheeraj.
-
-*Note: No formal open-source license file currently exists in this repository.*
+Built by Nemat Sachdeva.
